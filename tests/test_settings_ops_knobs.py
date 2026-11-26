@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from crawlutron.config.settings import CrawlerSettings
 from tests.chokepoint_paths import REPO_ROOT
 
@@ -62,6 +64,34 @@ class TestWarmupUrlsKnob:
     def test_comma_separated_list_is_split_and_stripped(self):
         urls = _read(warmup_urls=" http://a.example/ , , http://b.example/ ").warmup_urls
         assert urls == ("http://a.example/", "http://b.example/")
+
+
+class TestEgressProxyUrlKnob:
+    def test_default_is_empty(self):
+        assert _read().egress_proxy_url == ""
+
+    @pytest.mark.parametrize(
+        ("raw", "reason"),
+        [
+            ("ftp://proxy.internal", "unsupported egress proxy scheme"),
+            ("http://user:pass@proxy.internal", "must not include userinfo"),
+            ("http://proxy.internal?x=1", "must not include query or fragment"),
+            ("http://proxy.internal#frag", "must not include query or fragment"),
+            ("http://proxy.internal/path", "must not include a path"),
+            ("http://", "must include a host"),
+            ("http://proxy.internal:0", "invalid egress proxy port"),
+        ],
+    )
+    def test_refuses_unsafe_forms(self, raw: str, reason: str):
+        with pytest.raises(ValueError, match=reason):
+            _read(egress_proxy_url=raw)
+
+    @pytest.mark.parametrize(
+        "raw",
+        ["http://proxy.internal:8080", "https://proxy.internal", "http://proxy.internal/"],
+    )
+    def test_accepts_plain_origin_forms(self, raw: str):
+        assert _read(egress_proxy_url=raw).egress_proxy_url == raw
 
 
 def test_migrated_knobs_keep_their_documented_defaults():

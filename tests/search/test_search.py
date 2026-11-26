@@ -19,7 +19,7 @@ from crawlutron.search.providers import (
 )
 from crawlutron.search.providers_api import BraveProvider, SerperProvider, TavilyProvider, get_search_provider
 from crawlutron.search.providers_html import DuckDuckGoProvider
-from crawlutron.transport.pinned_transport import PinnedRequest
+from crawlutron.transport.transport import FetchRequest
 from safe_url.host_policy import HostPolicy
 from tests._assertions import one_search_result, provider_results
 
@@ -350,43 +350,26 @@ async def test_provider_registry_urls_are_not_caller_influenced(fake_provider_ht
     assert all(call["url"] in PROVIDER_ENDPOINTS for call in capture), [c["url"] for c in capture]
 
 
-async def test_provider_http_pins_the_connect_to_the_resolved_ip(monkeypatch):
-    """The provider fetch must connect to the IP it just validated (#377's
-    answer, on our own egress too): a rebind can never move the connection."""
+async def test_provider_http_sends_the_logical_endpoint(monkeypatch):
+    """The provider fetch hands its fixed logical endpoint to the pooled client;
+    target DNS and the dial belong to the proxy, so no app resolution happens."""
     import socket
 
     import crawlutron.search.providers as providers_module
-    from tests._assertions import block_private_targets
 
-    block_private_targets(monkeypatch)
-    state = {"resolves": 0}
+    def refuse_resolution(*args, **kwargs):
+        raise AssertionError("app-side provider DNS must never run")
 
-    def two_phase(host, *args, **kwargs):
-        _ = (args, kwargs)
-        state["resolves"] += 1
-        return [
-            (
-                socket.AF_INET,
-                socket.SOCK_STREAM,
-                6,
-                "",
-                ("1.2.3.4" if state["resolves"] == 1 else "169.254.169.254", 80),
-            )
-        ]
-
-    monkeypatch.setattr(socket, "getaddrinfo", two_phase)
+    monkeypatch.setattr(socket, "getaddrinfo", refuse_resolution)
     seen: list[str] = []
 
     class _RecordingClient(_FakeStreamClient):
-        def stream(self, method: str, url: str | PinnedRequest, **kwargs):
-            if isinstance(url, PinnedRequest):
-                seen.append(url.connect_url)
-                url = url.connect_url
-            else:
-                seen.append(url)
-            return super().stream(method, url, **kwargs)
+        def stream(self, method: str, url: str | FetchRequest, **kwargs):
+            logical = url.url.raw if isinstance(url, FetchRequest) else url
+            seen.append(logical)
+            return super().stream(method, logical, **kwargs)
 
     client = _RecordingClient(_FakeStreamResponse(b"{}"))
     monkeypatch.setattr(providers_module, "get_async_http_client", lambda: client)
     await providers_module.provider_http("GET", "https://provider.test/search", timeout_seconds=5.0)
-    assert seen == ["https://1.2.3.4/search"], "fetch was not pinned to the validated IP"
+    assert seen == ["https://provider.test/search"], "provider fetch must stay logical"

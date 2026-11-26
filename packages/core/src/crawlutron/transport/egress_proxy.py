@@ -1,13 +1,14 @@
-"""Loopback CONNECT/HTTP forward proxy: one admit-or-refuse door, no MITM.
+"""The sole admit-or-refuse egress door: loopback CONNECT/HTTP proxy, no MITM.
 
-Shadow mode: the live egress paths are untouched. Callers dial through this
-surface only when explicitly wired; the door itself owns every safety decision.
+The shipped topology wires all service egress here; the door owns every decision.
 """
 
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import socket
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -16,7 +17,13 @@ from crawlutron.runtime import process_state
 from crawlutron.transport.pinned_dns import bounded_thread_resolve, resolve_and_pin_host
 from safe_url import HostPolicy, NormalizedUrl, is_loopback_bind
 
-__all__ = ["ProxyBindRefused", "ProxyServer", "ProxyTarget", "admit_proxy_target", "serve_proxy"]
+__all__ = [
+    "ProxyBindRefused",
+    "ProxyServer",
+    "ProxyTarget",
+    "admit_proxy_target",
+    "serve_proxy",
+]
 
 _LOGGER = logging.getLogger(__name__)
 _REFUSAL_HEADER = "x-crawlutron-egress-refusal"
@@ -27,6 +34,8 @@ _Dial = Callable[[str, int], Awaitable[tuple[_Reader, _Writer]]]
 _REFUSAL_LINE = _REFUSAL_HEADER.lower().encode("ascii") + b":"
 _DRAIN_TIMEOUT = 30.0
 _MAX_HEAD = 65536
+
+_LIVE_SERVERS: set[ProxyServer] = set()
 
 
 class ProxyBindRefused(ValueError):
@@ -50,9 +59,6 @@ class ProxyTarget:
     def tls_hostname(self) -> str | None:
         """The SNI the client keeps through the tunnel; None for plain HTTP."""
         return self.url.tls_hostname
-
-
-_LIVE_SERVERS: set[ProxyServer] = set()
 
 
 def admit_proxy_target(authority: str, *, policy: HostPolicy, scheme: str = "https") -> ProxyTarget:
@@ -288,16 +294,22 @@ def _make_handler(policy: HostPolicy, dial: _Dial):
 class ProxyServer:
     """A running loopback proxy; ``aclose`` stops it and drops its registration."""
 
-    __slots__ = ("_port", "_server")
+    __slots__ = ("_port", "_server", "_bind_host")
 
-    def __init__(self, server: asyncio.AbstractServer, port: int) -> None:
+    def __init__(self, server: asyncio.AbstractServer, port: int, bind_host: str) -> None:
         self._server = server
         self._port = port
+        self._bind_host = bind_host
 
     @property
     def port(self) -> int:
         """The ephemeral loopback port this proxy listens on."""
         return self._port
+
+    @property
+    def bind_host(self) -> str:
+        """The host address this proxy is bound to."""
+        return self._bind_host
 
     @property
     def is_live(self) -> bool:
@@ -310,20 +322,43 @@ class ProxyServer:
         await self._server.wait_closed()
         _LIVE_SERVERS.discard(self)
 
+    async def serve_forever(self) -> None:
+        """Run the server until cancelled; the public lifecycle door for sidecar use."""
+        async with self._server:
+            await self._server.serve_forever()
+
 
 async def serve_proxy(
     *,
     policy: HostPolicy,
     host: str = "127.0.0.1",
+    port: int = 0,
     dial: _Dial | None = None,
+    sidecar_bind: ipaddress.IPv4Address | None = None,
 ) -> ProxyServer:
-    """Start a loopback-only CONNECT/HTTP proxy with an injectable dial seam."""
-    if not is_loopback_bind(host):
-        raise ProxyBindRefused("egress proxy binds loopback only")
+    """Start a CONNECT/HTTP proxy with an injectable dial seam.
+    By default binds loopback-only; pass ``sidecar_bind=IPv4Address(socket.INADDR_ANY)``
+    for dual-homed sidecar (only unspecified IPv4 address admitted).
+    """
+    # Validate sidecar_bind and host combination
+    if sidecar_bind is not None:
+        # Only the unspecified address (INADDR_ANY / 0.0.0.0) is admitted
+        if sidecar_bind != ipaddress.IPv4Address(socket.INADDR_ANY):
+            raise ProxyBindRefused("sidecar_bind admits only the unspecified IPv4 address (0.0.0.0)")
+        # Conflicting host argument is refused
+        if host != "127.0.0.1":
+            raise ProxyBindRefused("host and sidecar_bind cannot both specify a non-loopback bind")
+        bind_host = str(sidecar_bind)  # "0.0.0.0"
+    else:
+        # Default: loopback-only
+        if not is_loopback_bind(host):
+            raise ProxyBindRefused("egress proxy binds loopback only")
+        bind_host = host
+
     upstream = dial if dial is not None else _open_target
-    server = await asyncio.start_server(_make_handler(policy, upstream), host, 0)
-    port = server.sockets[0].getsockname()[1]
-    wrapped = ProxyServer(server, port)
+    server = await asyncio.start_server(_make_handler(policy, upstream), bind_host, port)
+    actual_port = server.sockets[0].getsockname()[1]
+    wrapped = ProxyServer(server, actual_port, bind_host)
     _LIVE_SERVERS.add(wrapped)
     return wrapped
 

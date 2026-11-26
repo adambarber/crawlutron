@@ -1,0 +1,51 @@
+# Thin test overlay on docker-compose.yml: the base supplies the app, the
+# egress proxy and the fixed-upstream API ingress relay; this file only names
+# the isolated test origin and the test images.
+#
+# Run with: docker compose -f docker-compose.yml -f docker-compose.egress.yml up -d
+
+services:
+  crawlutron:
+    image: crawlutron:egress-test
+    restart: "no"
+    networks:
+      - internal
+
+  api-ingress:
+    image: crawlutron:egress-test
+    restart: "no"
+    networks:
+      - internal
+      - ingress
+    ports:
+      - "127.0.0.1:${COMPOSE_HOST_PORT-8765}:8765"
+
+  egress-proxy:
+    image: crawlutron:egress-proxy
+    restart: "no"
+    command: ["python", "/app/scripts/egress_proxy_sidecar.py"]
+    environment:
+      EGRESS_PROXY_BIND_HOST: "0.0.0.0"
+      EGRESS_PROXY_BIND_PORT: "8888"
+      CRAWLUTRON_ALLOW_PRIVATE_TARGETS: "1"
+    depends_on:
+      - origin
+
+  origin:
+    image: python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
+    restart: "no"
+    command: >
+      python -m http.server 80 --bind 0.0.0.0
+    networks:
+      - egress
+
+networks:
+  internal:
+    driver: bridge
+    internal: true
+  egress:
+    driver: bridge
+    internal: false
+  ingress:
+    driver: bridge
+    internal: false

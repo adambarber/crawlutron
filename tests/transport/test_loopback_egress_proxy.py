@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import socket
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 import pytest
 
-from crawlutron.transport.egress_proxy import admit_proxy_target, serve_proxy
+from crawlutron.transport.egress_proxy import ProxyBindRefused, admit_proxy_target, serve_proxy
 from tests._assertions import resolves_in_sequence
 from tests._fetcher_factories import ParkedResolver
 from tests._host_assert import host_of
@@ -158,7 +160,7 @@ def test_door_refuses_a_resolver_that_answers_nothing(monkeypatch) -> None:
         admit_proxy_target("example.com:443", policy=UNRESTRICTED_HOST_POLICY)
 
 
-def test_saturated_resolver_fails_closed(monkeypatch) -> None:
+async def test_saturated_resolver_fails_closed(monkeypatch) -> None:
     """A saturated DNS pool refuses fast; the target never reaches a dial."""
     from crawlutron.transport import pinned_dns
     from tests._assertions import block_private_targets
@@ -175,8 +177,6 @@ def test_saturated_resolver_fails_closed(monkeypatch) -> None:
 
 async def test_non_loopback_bind_is_refused() -> None:
     """The server binds loopback only: a LAN-facing address is refused."""
-    from crawlutron.transport.egress_proxy import ProxyBindRefused
-
     with pytest.raises(ProxyBindRefused):
         await serve_proxy(policy=UNRESTRICTED_HOST_POLICY, host="0.0.0.0", dial=_dial_to(1, []))
 
@@ -248,3 +248,98 @@ async def test_client_half_close_keeps_the_origin_response_flowing(monkeypatch) 
         origin.close()
         await origin.wait_closed()
     assert first + rest == head + b"efgh"
+
+
+# ===== Typed sidecar bind admission tests =====
+
+
+async def test_default_serve_proxy_is_loopback_only() -> None:
+    """Default serve_proxy binds loopback-only without sidecar_bind."""
+    server = await serve_proxy(policy=UNRESTRICTED_HOST_POLICY, dial=_dial_to(1, []))
+    try:
+        assert server.bind_host == "127.0.0.1"
+        assert server.port > 0
+    finally:
+        await server.aclose()
+
+
+async def test_raw_zero_zero_zero_zero_refused() -> None:
+    """Raw '0.0.0.0' string is refused even without sidecar_bind."""
+    with pytest.raises(ProxyBindRefused):
+        await serve_proxy(policy=UNRESTRICTED_HOST_POLICY, host="0.0.0.0", dial=_dial_to(1, []))
+
+
+async def test_concrete_sidecar_bind_address_refused() -> None:
+    """Concrete non-loopback sidecar_bind address is refused."""
+    with pytest.raises(ProxyBindRefused):
+        await serve_proxy(
+            policy=UNRESTRICTED_HOST_POLICY,
+            dial=_dial_to(1, []),
+            sidecar_bind=ipaddress.IPv4Address("192.168.1.100"),
+        )
+
+
+async def test_loopback_sidecar_bind_refused() -> None:
+    """Loopback address as sidecar_bind is refused (must be INADDR_ANY)."""
+    with pytest.raises(ProxyBindRefused):
+        await serve_proxy(
+            policy=UNRESTRICTED_HOST_POLICY,
+            dial=_dial_to(1, []),
+            sidecar_bind=ipaddress.IPv4Address("127.0.0.1"),
+        )
+
+
+async def test_conflicting_host_and_sidecar_bind_refused() -> None:
+    """Conflicting host and sidecar_bind arguments are refused."""
+    with pytest.raises(ProxyBindRefused):
+        await serve_proxy(
+            policy=UNRESTRICTED_HOST_POLICY,
+            host="0.0.0.0",
+            dial=_dial_to(1, []),
+            sidecar_bind=ipaddress.IPv4Address(socket.INADDR_ANY),
+        )
+
+
+async def test_only_unspecified_ipv4_address_admitted() -> None:
+    """Only IPv4Address(socket.INADDR_ANY) is admitted as sidecar_bind."""
+    sidecar_addr = ipaddress.IPv4Address(socket.INADDR_ANY)
+    server = await serve_proxy(
+        policy=UNRESTRICTED_HOST_POLICY,
+        dial=_dial_to(1, []),
+        sidecar_bind=sidecar_addr,
+    )
+    try:
+        assert server.bind_host == "0.0.0.0"
+        assert server.port > 0
+    finally:
+        await server.aclose()
+
+
+async def test_actual_bind_uses_string_and_works_on_port_zero() -> None:
+    """Actual bind converts IPv4Address to string and works with port=0."""
+    sidecar_addr = ipaddress.IPv4Address(socket.INADDR_ANY)
+    server = await serve_proxy(
+        policy=UNRESTRICTED_HOST_POLICY,
+        port=0,
+        dial=_dial_to(1, []),
+        sidecar_bind=sidecar_addr,
+    )
+    try:
+        assert server.port > 0
+        assert server.bind_host == "0.0.0.0"
+        assert server.port == server.port
+    finally:
+        await server.aclose()
+
+
+async def test_server_close_reset_still_owns_listener() -> None:
+    """Server close/reset still owns the listener with sidecar_bind."""
+    sidecar_addr = ipaddress.IPv4Address(socket.INADDR_ANY)
+    server = await serve_proxy(
+        policy=UNRESTRICTED_HOST_POLICY,
+        dial=_dial_to(1, []),
+        sidecar_bind=sidecar_addr,
+    )
+    assert server.is_live
+    await server.aclose()
+    assert not server.is_live

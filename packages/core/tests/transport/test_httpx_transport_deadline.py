@@ -60,7 +60,6 @@ class TestDripFeedEndToEndDeadline:
         port = server.sockets[0].getsockname()[1]
         try:
             request = FetchRequest(
-                connect_url=f"http://127.0.0.1:{port}/",
                 headers={"Host": "127.0.0.1"},
                 url=canonical(f"http://127.0.0.1:{port}/"),
                 timeout_seconds=_READ_TIMEOUT,

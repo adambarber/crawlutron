@@ -233,24 +233,27 @@ async def test_redirect_hop_set_cookie_is_collected(monkeypatch):
     assert "sess=hop1" in _header_for(jar, "http://hop1.test/dashboard")
 
 
-async def test_hop_cookie_is_not_planted_when_the_next_pin_refuses(monkeypatch):
+async def test_hop_cookie_is_not_planted_when_the_next_hop_is_refused(monkeypatch):
     """RFC 6265 5.3 makes persistence the fetcher's choice, so the walk defers
-    a hop's Set-Cookie until the NEXT pin admits it: a walk dying at a refused
-    pin plants nothing (#525 SEC-06) -- no state leaks to an unreached target."""
+    a hop's Set-Cookie until the NEXT hop is admitted: a walk dying at a refused
+    redirect plants nothing (#525 SEC-06) -- no state leaks to an unreached target."""
 
-    from crawlutron.transport.pinned_transport import PinnedRequest
+    from safe_url.normalized_url import NormalizedUrl
 
-    def refusing_pin(url, headers):
-        if url.host == "refused.test":
-            raise ValueError("SSRF protection: cannot resolve hostname refused.test")
-        return PinnedRequest(connect_url=str(url), headers=dict(headers), url=url)
+    real_resolve = NormalizedUrl.resolve
 
+    def refusing_resolve(self, location):
+        if "refused.test" in str(location):
+            return None
+        return real_resolve(self, location)
+
+    monkeypatch.setattr(NormalizedUrl, "resolve", refusing_resolve)
     responses = [
         MockResponse(302, {"location": "http://refused.test/x", "set-cookie": "sess=defer1; Path=/"}, b""),
     ]
     patch_http_fetcher_transport(monkeypatch, responses, allow_ssrf_bypass=True)
-    with pytest.raises(ValueError, match="refused.test"):
-        await run_default_http_fetcher("http://deferred.test/login", pin=refusing_pin)
+    with pytest.raises(ValueError, match="redirect target refused admission"):
+        await run_default_http_fetcher("http://deferred.test/login")
     jar = cookie_jar.global_cookie_jar()
     assert _header_for(jar, "http://deferred.test/") == ""
 

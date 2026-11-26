@@ -1,7 +1,6 @@
-"""The webhook admission chokepoint: one order, validate then admit.
+"""The webhook admission chokepoint: validate URL shape, then admit.
 
-All three legs live in ``admit_webhook_target``; every door calls this single
-façade so a door that forgets a leg is structurally impossible.
+All legs live in ``admit_webhook_target``; target DNS is the proxy's job.
 """
 
 import pytest
@@ -17,10 +16,17 @@ async def test_admit_refuses_non_https_scheme():
         await admit_webhook_target("http://receiver.example/hook", host_policy=HostPolicy.unrestricted())
 
 
-async def test_admit_refuses_private_resolved_target(monkeypatch):
-    """Leg 2: the pinned-request SSRF rule refuses a private/resolved target."""
-    with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError, match="SSRF"):
-        await admit_webhook_target("https://evil.example.com/callback", host_policy=HostPolicy.unrestricted())
+async def test_admit_does_not_resolve_the_target(monkeypatch):
+    """Leg 2: shape admission never calls the resolver; the proxy owns DNS."""
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("webhook admission must not resolve its target")
+
+    monkeypatch.setattr("socket.getaddrinfo", refuse)
+    target = await admit_webhook_target(
+        "https://evil.example.com/callback", host_policy=HostPolicy.unrestricted()
+    )
+    assert target.delivery_url() == "https://evil.example.com/callback"
 
 
 async def test_admit_refuses_userinfo(monkeypatch):

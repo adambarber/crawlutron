@@ -21,9 +21,15 @@ def conftest_bytecode_enabled(bundle: Bundle) -> Iterator[Finding]:
 
 
 def image_release_script(bundle: Bundle) -> Iterator[Finding]:
-    """The image script binds the smoke to a reachable host and its baked version."""
+    """The image script binds the smoke to a reachable host, its baked version, and its baked proxy."""
     image = bundle.image
-    for value in ("CRAWLUTRON_HOST=0.0.0.0", "ghcr.io", "docker", "push"):
+    for value in (
+        "CRAWLUTRON_HOST=0.0.0.0",
+        "ghcr.io",
+        "docker",
+        "push",
+        "CRAWLUTRON_EGRESS_PROXY_URL=",
+    ):
         if not image.has_string(value):
             yield _finding(
                 RuleId.IMAGE_RELEASE_SCRIPT, image.path.name, 1, f"image script lost the {value!r} contract"
@@ -32,6 +38,10 @@ def image_release_script(bundle: Bundle) -> Iterator[Finding]:
     if "_check_baked_version" not in functions:
         yield _finding(
             RuleId.IMAGE_RELEASE_SCRIPT, image.path.name, 1, "image script must check the baked version"
+        )
+    if "_check_baked_proxy" not in functions:
+        yield _finding(
+            RuleId.IMAGE_RELEASE_SCRIPT, image.path.name, 1, "image script must check the baked proxy"
         )
     if not image.has_compare("baked_version", "!=", "native_version"):
         yield _finding(
@@ -42,3 +52,12 @@ def image_release_script(bundle: Bundle) -> Iterator[Finding]:
         )
     if not any(fact.name == "lower" for fact in image.of_kind("call")):
         yield _finding(RuleId.IMAGE_RELEASE_SCRIPT, image.path.name, 1, "a tag must be lowercased before use")
+    # Verify _smoke_image calls _check_baked_proxy
+    calls = {fact.name for fact in image.of_kind("call")}
+    if "_check_baked_proxy" not in calls:
+        yield _finding(
+            RuleId.IMAGE_RELEASE_SCRIPT,
+            image.path.name,
+            1,
+            "_smoke_image must call _check_baked_proxy",
+        )

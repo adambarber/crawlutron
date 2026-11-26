@@ -23,7 +23,7 @@ from crawlutron.storage.job_store import JobStatus, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
 from safe_url.host_policy import HostPolicy
 from tests._api_harnesses import run_with_webhook as _run_with_webhook
-from tests._assertions import block_private_targets, host_resolves_to
+from tests._assertions import host_resolves_to
 from tests._webhook_doubles import record_webhook_delivery
 
 
@@ -168,19 +168,21 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
         assert post_webhook.await_count == 0, post_webhook.await_count
 
 
-class TestWebhookValidationRunsOffLoop:
-    """Webhook host pinning must run off the event loop; a blackholed resolver
-    would otherwise stall the FastAPI loop. Pin as crawl targets do; delivery
-    re-pins through the same builder, closing the validation->delivery TOCTOU."""
+class TestWebhookDeliveryStaysLogical:
+    """Webhook delivery never resolves its target: the proxy owns target DNS and
+    the dial, so a blackholed resolver cannot stall the FastAPI loop."""
 
-    async def test_post_webhook_resolves_off_the_event_loop(self, monkeypatch):
-        """Every DNS work ``post_webhook`` does (the per-attempt delivery pin, #450)
-        must leave the event loop; a blackholed resolver would otherwise stall the
-        FastAPI loop. Pin as crawl targets do; delivery re-pins each attempt."""
+    @staticmethod
+    def _forbid_dns(monkeypatch):
+        def refuse(*args, **kwargs):
+            raise AssertionError("app-side webhook DNS must never run")
+
+        monkeypatch.setattr(socket, "getaddrinfo", refuse)
+
+    async def test_post_webhook_never_resolves_the_target(self, monkeypatch):
         from crawlutron.service.webhooks import post_webhook
 
-        block_private_targets(monkeypatch)
-        resolver_threads = _spy_resolver_threads(monkeypatch)
+        self._forbid_dns(monkeypatch)
         delivered = record_webhook_delivery(monkeypatch)
 
         await post_webhook(
@@ -188,30 +190,13 @@ class TestWebhookValidationRunsOffLoop:
             {"results": []},
         )
 
-        assert delivered, "delivery never ran; the test is not exercising the pin path"
-        assert resolver_threads, "socket.getaddrinfo was never called during delivery"
-        loop_thread = threading.current_thread()
-        for thread in resolver_threads:
-            assert thread is not loop_thread, (
-                f"the delivery pin resolved DNS on the event-loop thread {thread.name!r}; "
-                "it must run on a dns-resolve worker thread"
-            )
-            assert thread.name.startswith("dns-resolve"), (
-                f"the delivery pin did not reuse the dns-resolve pool (ran on {thread.name!r})"
-            )
+        assert delivered, "delivery never ran"
+        assert delivered[0].url.host == "public.example.com"
 
-    async def test_deliver_pinned_webhook_parses_off_the_event_loop(self, monkeypatch):
-        """The delivery pin must also leave the event loop.
-
-        ``deliver_pinned_webhook`` reaches ``build_pinned_request_async`` itself
-        (only the POST is stubbed), so a pin left inline resolves on the loop."""
+    async def test_deliver_pinned_webhook_never_resolves_the_target(self, monkeypatch):
         from crawlutron.service.webhooks import deliver_pinned_webhook
 
-        block_private_targets(monkeypatch)
-        resolver_threads = _spy_resolver_threads(monkeypatch)
-
-        # Stage only the HTTP answer: the pin must still run, and pinning is pure (no I/O), so no network call
-        # is attempted.
+        self._forbid_dns(monkeypatch)
         delivered = record_webhook_delivery(monkeypatch)
 
         await deliver_pinned_webhook(
@@ -219,26 +204,20 @@ class TestWebhookValidationRunsOffLoop:
             b"{}",
             host_policy=HostPolicy.unrestricted(),
         )
-        assert delivered, "delivery never ran; the test is not exercising the delivery path"
-        assert resolver_threads, "socket.getaddrinfo was never called during delivery"
-        loop_thread = threading.current_thread()
-        for thread in resolver_threads:
-            assert thread is not loop_thread, (
-                f"delivery resolved DNS on the event-loop thread {thread.name!r}; "
-                "it must run on a dns-resolve worker thread"
-            )
-            assert thread.name.startswith("dns-resolve"), (
-                f"delivery did not reuse the dns-resolve pool (ran on {thread.name!r})"
-            )
+        assert delivered, "delivery never ran"
+        assert delivered[0].url.host == "public.example.com"
 
-    async def test_validate_webhook_url_async_rejects_private(self, monkeypatch):
+    async def test_validate_webhook_url_async_admits_shape_without_target_dns(self, monkeypatch):
         from crawlutron.service.webhooks import validate_webhook_url_async
 
-        with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
-            await validate_webhook_url_async(
-                "http://evil.example.com/callback",
-                host_policy=HostPolicy.unrestricted(),
-            )
+        def refuse(*args, **kwargs):
+            raise AssertionError("webhook admission must not resolve its target")
+
+        monkeypatch.setattr(socket, "getaddrinfo", refuse)
+        await validate_webhook_url_async(
+            "http://evil.example.com/callback",
+            host_policy=HostPolicy.unrestricted(),
+        )
 
 
 class TestDeliveryTimeValidationFailureStaysBestEffort:

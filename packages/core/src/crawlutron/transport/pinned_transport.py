@@ -1,18 +1,14 @@
-"""Owns request pinning, redirect targeting, and stream composition.
+"""Redirect targeting and request-header safety for the logical fetch walk.
 
-Carries the pinned primitives over an admitted URL (fresh pin, connect
-composition, redirect-chain rules); never retries, extracts, or constructs.
+The proxy owns target admission, fresh DNS and the only dial; nothing here
+resolves a hostname or composes a connect URL.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol
-
 import httpx
 
 from crawlutron.safety.header_authority import survives_cross_origin
-from crawlutron.transport import pinned_dns as _dns
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE, global_cookie_jar
 from safe_url.normalized_url import NormalizedUrl
 
@@ -27,71 +23,6 @@ def declared_length_exceeds(header_value: str | None, limit: int) -> bool:
     except ValueError:
         return False
     return declared > limit
-
-
-@dataclass(frozen=True, slots=True)
-class PinnedRequest:
-    """One hop's wire plan: where to dial and what TLS must attest.
-
-    The composition owns both -- identity travels with the pin, so no
-    transport ever re-derives a hostname from a connect URL (#574).
-    """
-
-    connect_url: str
-    headers: dict[str, str]
-    url: NormalizedUrl
-
-    @property
-    def tls_hostname(self) -> str | None:
-        return self.url.tls_hostname
-
-
-def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> PinnedRequest:
-    """Build the pinned request for an admitted URL -- the sole owner of the
-    composition (IP blocklist, fresh pin, exact-IP connect with Host preserved).
-    Both schemes pin the connect to the validated IP; one resolution per hop.
-    """
-    _, pinned = _dns.resolve_and_pin_host(url)
-    port = f":{url.port}" if url.port else ""
-    # An IPv6 literal must be bracketed in a URL netloc or its colons
-    # corrupt port/path parsing; getaddrinfo can return v6.
-    host = f"[{pinned}]" if ":" in pinned else pinned
-    connect_url = f"{url.scheme}://{host}{port}{url.path or '/'}"
-    if url.query:
-        connect_url = f"{connect_url}?{url.query}"
-    out_headers = dict(headers)
-    out_headers["Host"] = f"[{url.host}]{port}" if ":" in url.host else f"{url.host}{port}"
-    tls = url.tls_hostname
-    if tls is not None:
-        # Close the connection: the pool keys this hop by the pinned IP, so two
-        # hosts on one IP would share one TLS session; reuse is a perf nicety.
-        out_headers["Connection"] = "close"
-    return PinnedRequest(connect_url=connect_url, headers=out_headers, url=url)
-
-
-class PinRule(Protocol):
-    """The rule that turns a URL into a request safe to connect to; named and injected.
-    It is the rule, not the resolver, that travels -- the resolver is the
-    SSRF decision and must never be doubled; tests inject a pinned request without rebinding the builder.
-    """
-
-    def __call__(self, url: NormalizedUrl, headers: dict[str, str]) -> PinnedRequest: ...
-
-
-async def build_pinned_request_async(
-    url: NormalizedUrl,
-    headers: dict[str, str],
-    *,
-    timeout_seconds: float | None = None,
-) -> PinnedRequest:
-    """Off-loop entry to the pin rule: SSRF-safe build, getaddrinfo included, on a
-    worker thread so a resolver lookup never stalls the event loop.
-    """
-    # The resolver wait is derived from the request's budget: no budget in
-    # hand means the DNS posture; a tighter budget tightens the wait.
-    return await _dns.bounded_thread_resolve(
-        lambda: build_pinned_request(url, headers), timeout_seconds=timeout_seconds
-    )
 
 
 MAX_REDIRECT_HOPS = 5

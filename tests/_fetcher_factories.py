@@ -107,17 +107,16 @@ async def invoke_browser_strategy(
 
 
 async def run_default_http_fetcher(url: str, headers=None, *, pin=None):
-    """The real default fetcher against a caller-supplied pin rule; ``pin`` is the
-    fetcher's own seam, forwarded rather than rebound over the transport module's
-    private builder, because a redirect test needs a pin that is not a resolver.
+    """The real default fetcher. ``pin`` is accepted for call-site compatibility
+    but ignored: the proxy owns target DNS and the only dial.
     """
     from crawlutron.transport.fetchers import default_http_fetcher
 
+    _ = pin
     return await default_http_fetcher(
         canonical(url),
         {} if headers is None else headers,
         30,
-        pin=pin,
     )
 
 

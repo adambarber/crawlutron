@@ -1,76 +1,42 @@
-# Standalone docker-compose for local crawlutron development.
+# Default-deny egress topology (production): app is internal-only, the sole
+# dual-homed container is the egress proxy (internal + egress), and a separate
+# fixed-upstream API ingress relay owns the loopback host port.
 #
-# This file is intentionally minimal: it builds the local Dockerfile, exposes
-# the service on loopback only, and mounts ./logs and ./cache so a development
-# iteration survives container restarts. Production deployments should add an
-# authenticated reverse proxy (e.g. Caddy) and persistent volumes.
+# Run with: docker compose up -d
+# For local development: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# For runtime proof test: docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
 
 services:
+  # The application container: on internal network for proxy communication,
+  # with loopback-only published port for host access and healthcheck.
+  # All egress must go through the sidecar proxy.
   crawlutron:
     build:
       context: .
       dockerfile: Dockerfile
-      # Compose is a local development environment, so opt into the explicit
-      # ``development`` target (uvicorn --reload --log-level debug). The
-      # Dockerfile's default/last stage is the lean production ``runtime``.
-      target: development
+      target: runtime
     image: crawlutron:local
-    container_name: crawlutron
     restart: unless-stopped
-    # PID 1 must reap children. The service spawns long-lived subprocesses
-    # (persistent document-extraction workers, Playwright browser drivers) whose
-    # parents can exit before them; without an init those orphans reparent to
-    # PID 1 and, when uvicorn is the PID 1, are never waited on -- they become
-    # zombies that docker cannot kill, and the container wedges irrecoverably
-    # (observed live: unkillable, port unbound, health dead for hours).
     init: true
-    # Pin the cgroup memory limit the RAM guardrail reads. Without this the
-    # container inherits the host/VM cgroup, so derive_browser_pool_size and
-    # _build_admission_policy size the browser pool and HTTP concurrency from a
-    # ceiling the container does not actually have -- admitting more in-flight
-    # work than 3 GiB can hold. Keep this in sync with the defaults documented
-    # in pressure_sizing.py.
     mem_limit: 3g
-    ports:
-      # Bind to loopback only; the service has no caller authentication by
-      # design and must not be exposed to the network without a reverse
-      # proxy in front of it.
-      - "127.0.0.1:8765:8765"
     environment:
-      # Keep defaults out of the container; override per-deployment.
-      # CRAWLUTRON_HOST=0.0.0.0 is required here: Docker port mapping
-      # cannot reach a loopback-bound process inside the container.
-      # External exposure stays gated by the loopback-only ports mapping above.
       CRAWLUTRON_HOST: "0.0.0.0"
       CRAWLUTRON_LOG_LEVEL: "info"
       CRAWLUTRON_WORKERS: "1"
       CRAWLUTRON_CACHE_DIR: "/app/cache"
       CRAWLUTRON_LOG_FILE: "/app/logs/crawlutron.jsonl"
-      # Opt-in: enable the on-disk content cache for repeatable crawls.
       CRAWLUTRON_CONTENT_CACHE_ENABLED: "true"
-      # SSRF guard on (secure default): only public HTTP(S) targets are
-      # crawlable. Set to "1" only for loopback-only local experimentation.
       CRAWLUTRON_ALLOW_PRIVATE_TARGETS: "0"
-      # --- Web search (POST /v1/search) ---
-      # "auto" activates the first keyed provider whose *_API_KEY is set, then
-      # falls back to the keyless DuckDuckGo endpoint. Uncomment a key below to
-      # enable that provider for production use.
       CRAWLUTRON_SEARCH_PROVIDER: "auto"
       CRAWLUTRON_TAVILY_API_KEY: "${CRAWLUTRON_TAVILY_API_KEY:-}"
-      # Operator token gating /v1/keys issuance, listing, and revocation.
       CRAWLUTRON_KEY_ADMIN_TOKEN: "${CRAWLUTRON_KEY_ADMIN_TOKEN:-}"
-      # CRAWLUTRON_BRAVE_API_KEY: ""
-      # CRAWLUTRON_SERPER_API_KEY: ""
-      # Belt over the image's baked value: guarantee ORT telemetry is off even if
-      # this service is ever pointed at an image built before that ENV landed.
-      # Zero-telemetry posture; see docs/references/crawlutron-telemetry.md.
+      # Point to sidecar proxy for all egress
+      CRAWLUTRON_EGRESS_PROXY_URL: "http://egress-proxy:8888"
     volumes:
       - ./logs:/app/logs
       - ./cache:/app/cache
-    # Telemetry egress blackhole for the sinks that have NO opt-out flag
-    # (Playwright 1DS, camoufox's App-Insights path). These hosts are never crawl
-    # targets, so sinkholing to 0.0.0.0 cannot affect the crawler itself. See
-    # docs/references/crawlutron-telemetry.md.
+    networks:
+      - internal
     extra_hosts:
       - "mobile.events.data.microsoft.com:0.0.0.0"
       - "browser.events.data.microsoft.com:0.0.0.0"
@@ -84,3 +50,65 @@ services:
       timeout: 10s
       start_period: 15s
       retries: 3
+    depends_on:
+      - egress-proxy
+
+  # Fixed-upstream TCP relay: host loopback -> app on the internal network.
+  # It never joins egress and never reads client input to choose a target.
+  api-ingress:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: crawlutron:local
+    restart: "no"
+    init: true
+    command: ["python", "/app/scripts/api_ingress_sidecar.py"]
+    environment:
+      API_INGRESS_BIND_HOST: "0.0.0.0"
+      API_INGRESS_BIND_PORT: "8765"
+      API_INGRESS_UPSTREAM_HOST: "crawlutron"
+      API_INGRESS_UPSTREAM_PORT: "8765"
+    # Docker needs a non-internal network to allocate a loopback host port.
+    ports:
+      - "127.0.0.1:${COMPOSE_HOST_PORT-8765}:8765"
+    networks:
+      - internal
+      - ingress
+    depends_on:
+      - crawlutron
+
+  # Sidecar egress proxy: the ONLY dual-homed container.
+  # Attached to both internal (for app) and egress (for outbound) networks.
+  # Runs the crawlutron egress proxy providing admission, DNS pinning,
+  # and logical-identity guarantee.
+  egress-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: crawlutron:egress-proxy
+    restart: "no"
+    init: true
+    mem_limit: 512m
+    command: ["python", "/app/scripts/egress_proxy_sidecar.py"]
+    environment:
+      EGRESS_PROXY_BIND_HOST: "0.0.0.0"
+      EGRESS_PROXY_BIND_PORT: "8888"
+    networks:
+      - internal
+      - egress
+
+networks:
+  # Internal network: app <-> proxy only. No internet access.
+  internal:
+    driver: bridge
+    internal: true
+  # Egress network: proxy <-> external only. Has internet access via host.
+  egress:
+    driver: bridge
+    internal: false
+  # Ingress network: only the API relay attaches, for loopback port allocation.
+  ingress:
+    driver: bridge
+    internal: false

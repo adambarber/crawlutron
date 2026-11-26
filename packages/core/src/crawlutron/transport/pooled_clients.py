@@ -19,7 +19,6 @@ from crawlutron.transport.egress_proxy_runtime import (
     has_egress_proxy,
     reset_egress_proxy,
 )
-from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.pooled_client_release import (
     PENDING_CLIENT_CLOSE,
     PENDING_CLIENT_CLOSE_LOCK,
@@ -31,6 +30,7 @@ from crawlutron.transport.pooled_client_release import (
     safe_aclose,
 )
 from crawlutron.transport.timeouts import Timeouts
+from crawlutron.transport.transport import FetchRequest
 from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT
 from safe_url.host_policy import HostPolicy
 
@@ -68,7 +68,7 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> PooledClient
         settings = _default_settings()
     client = httpx.AsyncClient(
         http2=True,
-        proxy=egress_proxy_url(HostPolicy.from_settings(_default_settings())),
+        proxy=egress_proxy_url(HostPolicy.from_settings(settings), settings=settings),
         trust_env=False,
         # Providers are operator-configured endpoints, so a redirect is suspicious
         # and never followed here; the crawl fetcher performs its own hops.
@@ -261,9 +261,9 @@ class LoopBoundPooledClient:
 
 
 class _PooledHttpClient:
-    """Facade over the pooled httpx client exposing pinned dial verbs only.
+    """Facade over the pooled httpx client exposing logical dial verbs only.
 
-    Every verb dials a PinnedRequest; raw URL dials are inexpressible.
+    Every verb dials a FetchRequest; raw URL dials are inexpressible.
     """
 
     __slots__ = ("_bound_loop", "_client")
@@ -292,7 +292,7 @@ class _PooledHttpClient:
     async def stream(
         self,
         method: str,
-        request: PinnedRequest,
+        request: FetchRequest,
         *,
         timeout: httpx.Timeout | None = None,
         headers: dict[str, str] | None = None,
@@ -301,7 +301,7 @@ class _PooledHttpClient:
         data: dict[str, str] | None = None,
         follow_redirects: bool | None = None,
     ) -> AsyncGenerator[httpx.Response, None]:
-        """One pinned stream via the proxy: TLS attests the logical host."""
+        """One logical stream via the proxy: TLS attests the logical host."""
         extensions = {"sni_hostname": request.tls_hostname} if request.tls_hostname else None
         kwargs: dict[str, Any] = {
             "headers": headers if headers is not None else request.headers,
@@ -319,12 +319,12 @@ class _PooledHttpClient:
                 raise httpx.ConnectError("egress proxy could not reach the pinned target")
             yield response
 
-    def get(self, request: PinnedRequest) -> AbstractAsyncContextManager[httpx.Response]:
-        """Pinned GET: the connect URL is the validated IP from the pin."""
+    def get(self, request: FetchRequest) -> AbstractAsyncContextManager[httpx.Response]:
+        """Logical GET: the proxy resolves and dials the request URL."""
         return self.stream("GET", request)
 
-    def post(self, request: PinnedRequest) -> AbstractAsyncContextManager[httpx.Response]:
-        """Pinned POST: the connect URL is the validated IP from the pin."""
+    def post(self, request: FetchRequest) -> AbstractAsyncContextManager[httpx.Response]:
+        """Logical POST: the proxy resolves and dials the request URL."""
         return self.stream("POST", request)
 
 

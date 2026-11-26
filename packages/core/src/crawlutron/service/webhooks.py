@@ -25,6 +25,7 @@ from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.transport.http_client_pool import get_async_http_client
 from crawlutron.transport.timeouts import Timeouts
+from crawlutron.transport.transport import FetchRequest
 from crawlutron_admit import Count, Duration
 from crawlutron_admit.task_scope import Grace, Handle, NamedRegistry, ScopeRefused, TaskScope
 from safe_url.host_policy import HostPolicy
@@ -125,15 +126,10 @@ async def deliver_pinned_webhook(
     """POST ``payload_bytes`` to ``webhook_url`` with DNS-rebinding safety.
     Raises :class:`DeliveryFailed` on a non-2xx so the retry loop can act on it.
     """
-    # one place) rather than urlparse/check/pin inline -- manual composition is the
+    # one place) rather than urlparse/check inline -- manual composition is the
     # shape that produced the redirect findings, and this closes validation's window.
-    from crawlutron.transport.pinned_transport import (
-        build_pinned_request_async,
-    )
-
     normalized = NormalizedUrl(webhook_url, policy=host_policy)
-    pinned = await build_pinned_request_async(normalized, {}, timeout_seconds=Timeouts.defaults().read)
-    request_headers = {"Content-Type": "application/json", **pinned.headers}
+    request_headers = {"Content-Type": "application/json"}
     secret = webhook_secret()
     if secret:
         # wall: the HMAC replay window is the receiver's wall clock.
@@ -142,12 +138,17 @@ async def deliver_pinned_webhook(
         request_headers[_TIMESTAMP_HEADER] = timestamp
     else:
         _warn_unsigned_once()
-    # Deliberate one-per-delivery cost: pooling would re-resolve by hostname (defeating
-    # the pin) or cache the IP across deliveries (reopening the rebinding window).
+    # The proxy owns target admission, fresh DNS and the only dial; the pooled
+    # client carries the logical URL and reuses the connection safely.
     client = get_async_http_client()
+    request = FetchRequest(
+        headers=request_headers,
+        url=normalized,
+        timeout_seconds=Timeouts.defaults().read,
+    )
     async with client.stream(
         "POST",
-        pinned,
+        request,
         content=payload_bytes,
         headers=request_headers,
     ) as response:
@@ -362,13 +363,10 @@ async def admit_webhook_target(webhook_url: str, *, host_policy: HostPolicy) -> 
 
 
 async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolicy) -> None:
-    """Validate a webhook URL against SSRF: resolves the hostname and rejects
-    private/loopback targets (DNS-rebinding class) via the one pin rule; raises
-    ValueError if unsafe. Off the event loop: sync getaddrinfo would stall it.
+    """Admit the webhook URL's shape and policy; target DNS and dial belong to
+    the proxy, so no resolution happens here. Raises ValueError if unsafe.
     """
-    from crawlutron.transport.pinned_transport import build_pinned_request_async
-
-    await build_pinned_request_async(NormalizedUrl(webhook_url, policy=host_policy), {})
+    NormalizedUrl(webhook_url, policy=host_policy)
 
 
 __all__ = [

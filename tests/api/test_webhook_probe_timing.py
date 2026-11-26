@@ -19,7 +19,7 @@ async def test_webhook_probe_completes_before_admission_is_entered(tmp_path, mon
     """The probe runs before admission reserves the slot, so it cannot hold the lock."""
     events: list[str] = []
 
-    async def slow_probe(normalized: object, headers: object = None, **_kwargs: object) -> None:
+    async def slow_probe(webhook_url: str, *, host_policy: object = None) -> None:
         await asyncio.sleep(0.05)
         events.append("probe")
 
@@ -27,7 +27,7 @@ async def test_webhook_probe_completes_before_admission_is_entered(tmp_path, mon
         events.append("reserve")
         return await _reserve(self, *args, **kwargs)
 
-    monkeypatch.setattr("crawlutron.transport.pinned_transport.build_pinned_request_async", slow_probe)
+    monkeypatch.setattr("crawlutron.service.webhooks.validate_webhook_url_async", slow_probe)
 
     with patch.object(CallerConcurrencyTracker, "reserve", recording_reserve):
         async with quota_client(tmp_path) as (client, _store, _results, keys):

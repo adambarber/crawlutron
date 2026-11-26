@@ -1,6 +1,6 @@
-"""A plain-HTTP fetch must never leak the pinned IP: the pin rewrites the wire
-host to the resolved IP while preserving the logical URL, so final_url, cookie
-keying and link-base must all reflect the ORIGINAL hostname, never the IP.
+"""A plain-HTTP fetch must keep the logical hostname in final_url: the proxy
+owns DNS and the dial, so no resolved IP ever reaches a result, cookie key or
+link base.
 """
 
 import asyncio
@@ -31,25 +31,19 @@ class _FakeStream:
         return None
 
 
-def test_final_url_uses_hostname_not_pinned_ip():
-    from crawlutron.transport.pinned_transport import PinnedRequest
-
-    pinned = "http://93.184.216.34:80/page"
-    fake = _FakeStream(pinned)
-
-    def _pin(url, headers):
-        return PinnedRequest(connect_url=pinned, headers={"Host": "example.com"}, url=url)
+def test_final_url_uses_logical_hostname_not_a_resolved_ip():
+    logical = "http://example.com/page"
+    fake = _FakeStream(logical, headers={"content-type": "text/html"})
 
     with patch.object(pool_mod, "get_async_http_client") as gc:
         gc.return_value.stream.return_value = fake
         result = asyncio.run(
             default_http_fetcher(
-                canonical("http://example.com/page"),
+                canonical(logical),
                 {},
                 5,
                 1_000_000,
-                pin=_pin,
             )
         )
-    assert result.final_url.raw == "http://example.com/page"
+    assert result.final_url.raw == logical
     assert "93.184.216.34" not in result.final_url.raw

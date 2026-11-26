@@ -197,8 +197,8 @@ def test_development_stage_keeps_hot_reload_as_an_opt_in() -> None:
 
 
 def test_compose_builds_the_development_target() -> None:
-    """Local compose opts into the hot-reload target explicitly."""
+    """Local development compose opts into the hot-reload target explicitly."""
     import yaml
 
-    document = yaml.safe_load((SERVICE_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    document = yaml.safe_load((SERVICE_ROOT / "docker-compose.dev.yml").read_text(encoding="utf-8"))
     assert document["services"]["crawlutron"]["build"]["target"] == "development"

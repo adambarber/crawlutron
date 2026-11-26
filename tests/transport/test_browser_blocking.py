@@ -58,7 +58,7 @@ async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     assert route.decision == "abort", "loopback URL should be aborted by NormalizedUrl admission"
 
 
-async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool():
+async def test_ssrf_route_handler_admits_logically_without_browser_dns():
     """In proxy mode, DNS resolution happens on the proxy side, not in the browser.
 
     The browser only validates via NormalizedUrl admission.

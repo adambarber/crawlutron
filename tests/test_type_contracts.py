@@ -61,10 +61,10 @@ _KEYWORD_ONLY = frozenset({inspect.Parameter.KEYWORD_ONLY})
 
 # What a production fetcher is this call PLUS: the keyword-only arguments the engine binds and the call site
 # never passes.
-_BOUND_KEYWORDS = ("impersonate", "pin", "release_stream_noblock")
-# ``pin`` is optional for safety-edge reasons; ``release_stream_noblock`` is the borrow-close
+_BOUND_KEYWORDS = ("impersonate", "release_stream_noblock")
+# ``impersonate`` is the cffi TLS-shape knob; ``release_stream_noblock`` is the borrow-close
 # injection seam callers omit in production (they get the private non-blocking closer).
-_BOUND_KEYWORD_OPTIONAL = frozenset({"impersonate", "pin", "release_stream_noblock"})
+_BOUND_KEYWORD_OPTIONAL = frozenset({"impersonate", "release_stream_noblock"})
 
 # The shape every production fetcher must have: HttpFetcher's own positional parameters, read off the Protocol
 # so a rename there is a rename here, plus the two bound keywords typed above.
@@ -238,10 +238,9 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
 
 
 def test_production_never_substitutes_the_pin_rule():
-    """``pin=`` is a test door, and a production call site must never use it.
+    """The retired ``pin=`` seam must never reappear at a production call site.
 
-    A substituted pin rule skips DNS resolution and the SSRF check it feeds;
-    a walk because that failure is silent by construction."""
+    It used to skip target DNS and the SSRF check it fed, silently."""
     offenders: list[str] = []
     for path in app_python_files():
         tree = ast.parse(path.read_text(), filename=str(path))

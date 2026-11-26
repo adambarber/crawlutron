@@ -263,11 +263,9 @@ def _render_results(script: str, results: dict[str, str]) -> str:
 
 def _run_script(script: str) -> subprocess.CompletedProcess[str]:
     """Execute as GitHub executes it: `bash -e {0}`."""
-    from scripts.executables import BASH, require_executable
+    from tests._subprocess_helpers import run_script
 
-    return subprocess.run(
-        [require_executable(BASH), "-e", "-c", script], capture_output=True, text=True, check=False
-    )
+    return run_script(script)
 
 
 def _assert_no_continue_on_error(block: dict[str, object], label: str) -> None:

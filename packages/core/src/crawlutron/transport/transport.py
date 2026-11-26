@@ -37,13 +37,19 @@ class Closeable(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class FetchRequest:
-    """One hop's admission: the pinned connect plan, the headers to send, the
-    logical URL (for results, cookies, and the proxied wire), and the timeout."""
+    """One logical hop: the admitted URL, headers and timeout.
 
-    connect_url: str
+    The proxy owns fresh DNS and the only dial; the app never carries a connect URL.
+    """
+
     headers: dict[str, str]
     url: NormalizedUrl
     timeout_seconds: float
+
+    @property
+    def tls_hostname(self) -> str | None:
+        """The logical hostname TLS must attest, never a resolved IP."""
+        return self.url.tls_hostname
 
 
 class Transport(Protocol):
@@ -75,8 +81,8 @@ def _http_error_result(
 def http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> HttpFetchResult:
     """Standard 413 (payload too large) result.
 
-    Takes the logical ``final_url``, never ``current_url``: a pinned plain-HTTP
-    response url is the resolved-IP literal, which leaks topology."""
+    Takes the logical ``final_url``, never a response-derived IP literal, which
+    would leak topology."""
     return _http_error_result(url, final_url, started, 413)
 
 

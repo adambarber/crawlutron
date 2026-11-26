@@ -66,7 +66,9 @@ async def _fetch_through_proxy(
         proxy = await serve_proxy(policy=UNRESTRICTED_HOST_POLICY, dial=_record_dial(origin_port, seen))
         try:
             monkeypatch.setattr(
-                pooled_cffi, "egress_proxy_url", lambda policy: f"http://127.0.0.1:{proxy.port}"
+                pooled_cffi,
+                "egress_proxy_url",
+                lambda policy, settings=None: f"http://127.0.0.1:{proxy.port}",
             )
             result = await default_http_fetcher(
                 canonical(f"http://{LOGICAL}/page"), {}, 10, 1024, impersonate=True
@@ -140,9 +142,10 @@ async def test_cffi_proxy_dial_failed_marker_raises_transport_exception(monkeypa
     process_state.reset_all_process_state()
     proxy = await serve_proxy(policy=UNRESTRICTED_HOST_POLICY, dial=refuse_dial)
     try:
-        monkeypatch.setattr(pooled_cffi, "egress_proxy_url", lambda policy: f"http://127.0.0.1:{proxy.port}")
+        monkeypatch.setattr(
+            pooled_cffi, "egress_proxy_url", lambda policy, settings=None: f"http://127.0.0.1:{proxy.port}"
+        )
         request = FetchRequest(
-            connect_url=f"http://{PUBLIC_IP}/page",
             headers={"Host": LOGICAL},
             url=canonical(f"http://{LOGICAL}/page"),
             timeout_seconds=10.0,

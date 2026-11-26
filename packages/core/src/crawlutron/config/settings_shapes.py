@@ -97,9 +97,10 @@ class RetentionFields(TypedDict):
 
 
 class OpsFields(TypedDict):
-    """The keys `_ops_fields` reads: the four formerly-direct operator knobs."""
+    """The keys `_ops_fields` reads: the five formerly-direct operator knobs."""
 
     max_webhook_size: int
     user_agent: str
     headless: bool
     warmup_urls: tuple[str, ...]
+    egress_proxy_url: str

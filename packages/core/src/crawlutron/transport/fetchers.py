@@ -10,7 +10,7 @@ from curl_cffi.requests.exceptions import SSLError
 
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.http_fetcher import HttpFetcher
-from crawlutron.transport import pinned_transport, pooled_clients
+from crawlutron.transport import pooled_clients
 from crawlutron.transport.cffi_transport import CffiTransport
 from crawlutron.transport.httpx_transport import HttpxTransport
 from crawlutron.transport.redirect_walker import RedirectWalker
@@ -29,7 +29,6 @@ async def default_http_fetcher(
     max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     *,
     impersonate: bool = False,
-    pin: pinned_transport.PinRule | None = None,
     release_stream_noblock: Callable[[object], None] | None = None,
 ) -> HttpFetchResult:
     """The one fetcher: TLS impersonation first when asked (httpx fallback on
@@ -43,14 +42,13 @@ async def default_http_fetcher(
             headers,
             timeout_seconds,
             max_content_length,
-            pin=pin,
             release_stream_noblock=release_stream_noblock,
         )
         if attempted is not None:
             return attempted
     await pooled_clients.drain_pending_client_closes()
     result = await RedirectWalker(HttpxTransport(), store_cookies=store_hop_cookies).walk(
-        url, headers, timeout_seconds, max_bytes=max_content_length, pin=pin
+        url, headers, timeout_seconds, max_bytes=max_content_length
     )
     if result is None:
         # The httpx transport always returns a terminal result.
@@ -65,7 +63,6 @@ async def cffi_fetch(
     max_content_length: int,
     *,
     release_stream_noblock: Callable[[object], None] | None = None,
-    pin: pinned_transport.PinRule | None = None,
 ) -> HttpFetchResult | None:
     """The curl_cffi transport behind impersonate=True. Returns None on
     transport failure so the httpx fallback can serve. TLS-handshake failures
@@ -77,7 +74,7 @@ async def cffi_fetch(
         return await RedirectWalker(
             CffiTransport(release_stream_noblock=release_stream_noblock),
             store_cookies=store_hop_cookies,
-        ).walk(url, headers, timeout_seconds, max_bytes=max_content_length, pin=pin)
+        ).walk(url, headers, timeout_seconds, max_bytes=max_content_length)
     except SSLError:
         raise
     except Exception as error:  # other cffi failures fall back, but visibly

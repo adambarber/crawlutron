@@ -179,6 +179,14 @@ RUN /app/.venv/bin/python -c "from camoufox.fpgen_model import ensure_fpgen_mode
 # file sink on import (and skips the stream handler as already present).
 COPY --chown=appuser:appuser uvicorn-log-config.json /app/uvicorn-log-config.json
 
+# Copy the optional sidecar launcher for dual-homed deployments (internal+egress
+# networks). The sidecar is a standalone binary/program, not project source;
+# it uses the public ProxyServer.serve_forever() lifecycle door.
+COPY --chown=appuser:appuser scripts/egress_proxy_sidecar.py /app/scripts/egress_proxy_sidecar.py
+
+# The optional loopback API ingress relay: fixed upstream, no egress access.
+COPY --chown=appuser:appuser scripts/api_ingress_sidecar.py /app/scripts/api_ingress_sidecar.py
+
 EXPOSE 8765
 
 # Add a healthcheck based on the FastAPI /health endpoint
