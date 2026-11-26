@@ -21,6 +21,8 @@ _HOST_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,251}[A-Za-z0-9])?\Z")
 _EGRESS_PORT = 8888
 _INGRESS_PORT = 8765
 
+__all__ = ["SidecarConfig", "parse_port"]
+
 
 def parse_port(raw: str | None, name: str, default: int) -> int:
     """Parse one fail-closed TCP port in 1..65535."""

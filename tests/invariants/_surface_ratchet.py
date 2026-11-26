@@ -19,6 +19,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # RAISED to (8, 6) by #621: EnvDecisionMemo is the one shared env-decision memo
     # (it replaced two hand-copied lumps; net surface across the memo modules went DOWN).
     "packages/core/src/crawlutron/config/env.py": (8, 6),
+    # #1462: the one typed sidecar admission door (SidecarConfig + parse_port).
+    "packages/core/src/crawlutron/config/sidecar.py": (2, 2),
     # RAISED to (7, 6): failed_unified_result is the single failure projection.
     "packages/core/src/crawlutron/service/response_shaping.py": (7, 6),
     "packages/core/src/crawlutron/service/unified_shaping.py": (7, 7),
