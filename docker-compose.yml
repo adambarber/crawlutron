@@ -6,6 +6,11 @@
 # For local development: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 # For runtime proof test: docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
 
+# One deployment policy source; app and egress sidecar merge the same anchor.
+x-sidecar-policy: &sidecar-policy
+  CRAWLUTRON_ALLOWED_HOSTS: "${CRAWLUTRON_ALLOWED_HOSTS:-}"
+  CRAWLUTRON_DENIED_HOSTS: "${CRAWLUTRON_DENIED_HOSTS:-}"
+
 services:
   # The application container: on internal network for proxy communication,
   # with loopback-only published port for host access and healthcheck.
@@ -20,6 +25,7 @@ services:
     init: true
     mem_limit: 3g
     environment:
+      <<: *sidecar-policy
       CRAWLUTRON_HOST: "0.0.0.0"
       CRAWLUTRON_LOG_LEVEL: "info"
       CRAWLUTRON_WORKERS: "1"
@@ -93,6 +99,7 @@ services:
     mem_limit: 512m
     command: ["python", "/app/scripts/egress_proxy_sidecar.py"]
     environment:
+      <<: *sidecar-policy
       EGRESS_PROXY_BIND_HOST: "0.0.0.0"
       EGRESS_PROXY_BIND_PORT: "8888"
     networks:
