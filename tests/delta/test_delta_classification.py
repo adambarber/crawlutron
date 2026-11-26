@@ -135,18 +135,26 @@ def _classified(
     return _classify(result, context)
 
 
-def test_200_against_validator_baseline_by_agreement():
+@pytest.mark.parametrize(
+    ("validators", "expected", "why"),
+    [
+        pytest.param(
+            {"etag": ETAG_V1, "last_modified": "Wed"},
+            UNCHANGED,
+            "validators_match",
+            id="etag-and-last-modified-match",
+        ),
+        pytest.param({"etag": '"v2"'}, CHANGED, "validators_diff", id="etag-differs"),
+        pytest.param({}, CHANGED, "validators_diff", id="no-validators"),
+    ],
+)
+def test_200_against_validator_baseline_by_agreement(validators, expected, why):
     """Matching validators are unchanged, differing ones changed; no validators
     against a baseline that has one is a difference, never a silent unchanged."""
-    cases = [
-        ({"etag": ETAG_V1, "last_modified": "Wed"}, UNCHANGED, "validators_match"),
-        ({"etag": '"v2"'}, CHANGED, "validators_diff"),
-        ({}, CHANGED, "validators_diff"),
-    ]
-    for validators, expected, why in cases:
-        result = engine_result(URL, "rendered", http_status=200, validators=validators)
-        assert _classified(result, baseline=_baseline_evidence(last_modified="Wed"))[1]["why"] == why
-        assert _classified(result, baseline=_baseline_evidence(last_modified="Wed"))[0] == expected
+    result = engine_result(URL, "rendered", http_status=200, validators=validators)
+    classification, evidence = _classified(result, baseline=_baseline_evidence(last_modified="Wed"))
+    assert evidence["why"] == why
+    assert classification == expected
 
 
 def test_200_against_fingerprint_baseline_by_agreement():
