@@ -11,6 +11,7 @@ import time
 
 import pytest
 
+from crawlutron.transport import http_client_pool
 from crawlutron.transport.httpx_transport import HttpxTransport
 from crawlutron.transport.transport import FetchRequest, FetchResult
 from crawlutron_admit import Count, Duration
@@ -86,6 +87,7 @@ class TestDripFeedEndToEndDeadline:
 
             return await asyncio.wait_for(probe(), timeout=_WAIT_FOR_BOUND)
         finally:
+            await http_client_pool.close_async_http_client()
             for task in handler_tasks:
                 await task
             server.close()
@@ -143,3 +145,10 @@ class TestDripFeedEndToEndDeadline:
                 await handle.task
             assert lifecycle["task"].done(), "handler task left running after fetch"
             assert lifecycle["writer"].is_closing(), "accepted writer left open after fetch"
+
+    async def test_pooled_client_is_closed_when_the_fetch_hop_is_cancelled(self):
+        """The harness releases the pooled client through the public door on cancellation."""
+        client = http_client_pool.get_async_http_client()
+        with pytest.raises(TimeoutError):
+            await self._fetch(_drip_handler)
+        assert client.is_closed, "pooled async client left open after the fetch was cancelled"
