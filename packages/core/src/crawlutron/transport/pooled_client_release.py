@@ -179,7 +179,7 @@ def discard_if_unowned_loop(
     *,
     reset: bool = False,
 ) -> None:
-    """Release ``slot``'s object, closing it on its owning loop when it has one.
+    """Release ``slot``'s object, closing on its owning loop when drivable.
 
     ``namespace`` holds the pooled object; one helper serves every pool module.
     With ``reset``, abort a client bound to the running loop, never schedule.
@@ -204,7 +204,14 @@ def discard_if_unowned_loop(
             else:
                 _close_on_owning_loop(bound, close)
         else:
-            bound.run_until_complete(close())
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                bound.run_until_complete(close())
+            else:
+                # Another loop runs here: driving the idle loop raises before
+                # the close coroutine starts, stranding it. Close on a worker.
+                close_on_thread(close)
         namespace[slot] = None
         return
     _close_cross_loop(close)
