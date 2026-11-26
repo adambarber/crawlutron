@@ -11,7 +11,7 @@ import socket
 import sys
 from collections.abc import Mapping
 
-from crawlutron_admit.task_scope import Grace, NamedRegistry, TaskScope
+from crawlutron_admit.task_scope import Grace, Handle, NamedRegistry, TaskScope
 from crawlutron_admit.values import Count, Duration
 
 _LOGGER = logging.getLogger(__name__)
@@ -75,19 +75,27 @@ async def _pump(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
 async def relay_connection(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter, config: IngressConfig, scope: TaskScope
 ) -> None:
-    """Pipe one accepted client to the fixed upstream until both halves close."""
+    """Dial, pump and close as one governed operation; a dial fault still closes the client."""
     _, _, upstream_host, upstream_port = config
-    upstream_reader, upstream_writer = await asyncio.open_connection(upstream_host, upstream_port)
-    pumps = (
-        scope.spawn_now(lambda: _pump(reader, upstream_writer)),
-        scope.spawn_now(lambda: _pump(upstream_reader, writer)),
-    )
+    upstream_writer: asyncio.StreamWriter | None = None
+    pumps: tuple[Handle, ...] = ()
     try:
+        try:
+            upstream_reader, upstream = await asyncio.open_connection(upstream_host, upstream_port)
+        except OSError:
+            _LOGGER.warning("api ingress could not reach the fixed upstream")
+            return
+        upstream_writer = upstream
+        pumps = (
+            scope.spawn_now(lambda: _pump(reader, upstream)),
+            scope.spawn_now(lambda: _pump(upstream_reader, writer)),
+        )
         await asyncio.gather(*(handle.task for handle in pumps), return_exceptions=True)
     finally:
-        for stream in (writer, upstream_writer):
+        streams = tuple(stream for stream in (writer, upstream_writer) if stream is not None)
+        for stream in streams:
             stream.close()
-        await asyncio.gather(writer.wait_closed(), upstream_writer.wait_closed(), return_exceptions=True)
+        await asyncio.gather(*(stream.wait_closed() for stream in streams), return_exceptions=True)
         for handle in pumps:
             scope.stop_now(handle)
 
@@ -101,7 +109,14 @@ async def start(config: IngressConfig) -> tuple[asyncio.Server, int, TaskScope]:
     )
 
     def _accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        scope.spawn_now(lambda: relay_connection(reader, writer, config, scope))
+        handle = scope.spawn_now(lambda: relay_connection(reader, writer, config, scope))
+
+        def _settled(task: asyncio.Task[object]) -> None:
+            if not task.cancelled():
+                task.exception()
+            scope.stop_now(handle)
+
+        handle.task.add_done_callback(_settled)
 
     server = await asyncio.start_server(_accept, str(bind_host), bind_port)
     return server, int(server.sockets[0].getsockname()[1]), scope

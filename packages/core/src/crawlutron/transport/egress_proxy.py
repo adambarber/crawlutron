@@ -1,7 +1,6 @@
-"""Loopback CONNECT/HTTP forward proxy: one admit-or-refuse door, no MITM.
+"""The sole admit-or-refuse egress door: loopback CONNECT/HTTP proxy, no MITM.
 
-Shadow mode: the live egress paths are untouched. Callers dial through this
-surface only when explicitly wired; the door itself owns every safety decision.
+The shipped topology wires all service egress here; the door owns every decision.
 """
 
 from __future__ import annotations

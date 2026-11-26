@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import socket
 
 import pytest
@@ -97,6 +98,49 @@ async def test_relay_pipes_bytes_and_half_close() -> None:
         assert not server.is_serving()
         assert sink == [b"ping"]
         assert scope.registry.active.value == 0
+
+
+async def test_failed_upstream_dial_closes_client_and_releases_slot(caplog: pytest.LogCaptureFixture) -> None:
+    """A dead upstream closes the client socket and returns the relay's slot."""
+    from scripts.api_ingress_sidecar import parse_ingress_config, serve_forever, start
+
+    config = parse_ingress_config(
+        {
+            "API_INGRESS_BIND_HOST": "0.0.0.0",
+            "API_INGRESS_BIND_PORT": str(_free_port()),
+            "API_INGRESS_UPSTREAM_HOST": "127.0.0.1",
+            "API_INGRESS_UPSTREAM_PORT": str(_free_port()),
+        }
+    )
+    server, port, scope = await start(config)
+    serving = scope.spawn_now(lambda: serve_forever(server, scope))
+    baseline = scope.registry.active.value
+    before_tasks = set(asyncio.all_tasks())
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
+        try:
+            with caplog.at_level(logging.WARNING, logger="scripts.api_ingress_sidecar"):
+                assert await asyncio.wait_for(reader.read(1), 5) == b"", (
+                    "client socket left open on failed dial"
+                )
+            reasons = [r.getMessage() for r in caplog.records if r.name == "scripts.api_ingress_sidecar"]
+            assert any("could not reach the fixed upstream" in reason for reason in reasons), (
+                "no fixed refusal"
+            )
+            assert all("127.0.0.1" not in reason for reason in reasons), "target echoed in refusal"
+            for _ in range(200):
+                if scope.registry.active.value == baseline:
+                    break
+                await asyncio.sleep(0.01)
+            assert scope.registry.active.value == baseline, "failed relay leaked its registry slot"
+            leaked = [task for task in asyncio.all_tasks() if task not in before_tasks and not task.done()]
+            assert leaked == [], "failed relay left a pending task"
+        finally:
+            writer.close()
+            await writer.wait_closed()
+    finally:
+        await scope.stop(serving, Grace(2))
+    assert not server.is_serving()
 
 
 async def test_relay_ignores_client_selected_upstream() -> None:

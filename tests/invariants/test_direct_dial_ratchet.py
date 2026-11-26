@@ -7,16 +7,17 @@ from __future__ import annotations
 
 import ast
 import collections
+import pathlib
 
 import pytest
 
-from tests._walk_primitives import offender_at, parsed_source
+from tests._walk_primitives import offender_at, parsed_source, python_bearing_roots, trees_under
 from tests._walk_resolution import resolved_call_name, resolved_expr_name
 from tests.chokepoint_paths import REPO_ROOT, relative_posix
 from tests.chokepoint_walks import app_trees, call_nodes
 from tests.rules import Bites, Rule
 
-_SANCTIONED = frozenset(
+_SANCTIONED_APP = frozenset(
     {
         # The proxy dials the pinned IP; its dial is the door, not a bypass.
         "packages/core/src/crawlutron/transport/egress_proxy.py",
@@ -24,6 +25,33 @@ _SANCTIONED = frozenset(
         "packages/rest/src/crawlutron_rest/cli/client.py",
     }
 )
+# Runtime sidecars dial fixed configured targets; ops tools dial TO the service.
+_SANCTIONED_SCRIPTS = frozenset(
+    {
+        "scripts/api_ingress_sidecar.py",
+        "scripts/egress_proxy_sidecar.py",
+        "scripts/e2e_verify.py",
+        "scripts/probe_session.py",
+        "scripts/review_support.py",
+    }
+)
+_SANCTIONED = _SANCTIONED_APP | _SANCTIONED_SCRIPTS
+
+#: The scripts scan root derives from the manifest-backed python-bearing roots.
+_SCRIPT_ROOTS: tuple[pathlib.Path, ...] = tuple(
+    REPO_ROOT / name
+    for name in python_bearing_roots()
+    if name in {relative.split("/", 1)[0] for relative in _SANCTIONED_SCRIPTS}
+)
+assert _SCRIPT_ROOTS, "scripts scan root vanished: the direct-dial gate would walk nothing"
+
+
+def _governed_trees(*, exclude: frozenset[str] = frozenset()) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
+    """App trees plus the derived scripts root, through one shared walk."""
+    return app_trees(exclude=exclude) + tuple(
+        (path, tree) for root in _SCRIPT_ROOTS for path, tree in trees_under(root)
+    )
+
 
 #: Raw public dials: socket construction/creation and the connect method.
 _RAW_SOCKET_NAMES = frozenset({"socket.socket", "socket.create_connection"})
@@ -116,13 +144,14 @@ def _direct_dial_offenders(tree, path) -> list[str]:
 DIRECT_DIAL = Rule(
     name="direct-dial-ratchet",
     find=_direct_dial_offenders,
+    scope=_governed_trees,
     bite=lambda: Bites("client = httpx.AsyncClient()\n", marker=_MARKER),
     summary="new outbound dial sites must be routed through the loopback proxy door",
     clean=lambda: ("value = mapping.get('key')\n",),
 )
 
 # #1364 S5 topology: ratchet collapses to zero; raw sockets/unproxied clients refused.
-_RATCHET = {"search": 0, "service": 0, "transport": 0}
+_RATCHET = {"search": 0, "service": 0, "transport": 0, "scripts": 0}
 
 
 def _group(relative: str) -> str:
@@ -135,7 +164,7 @@ def _group(relative: str) -> str:
 
 def _counts() -> collections.Counter[str]:
     counts: collections.Counter[str] = collections.Counter()
-    for path, tree in app_trees():
+    for path, tree in _governed_trees():
         relative = relative_posix(path)
         if relative in _SANCTIONED:
             continue
@@ -146,7 +175,7 @@ def _counts() -> collections.Counter[str]:
 def _row_offenders(row: str) -> list[str]:
     return [
         offender
-        for path, tree in app_trees()
+        for path, tree in _governed_trees()
         if relative_posix(path) not in _SANCTIONED and _group(relative_posix(path)) == row
         for offender in _direct_dial_offenders(tree, path)
     ]
@@ -172,6 +201,29 @@ def test_the_gate_walks_every_app_tree() -> None:
     """The derivation covers every production module; the bite is proven by the
     Rule/Bites test, not by production offenders (topology drives counts to zero)."""
     assert len(app_trees()) > 100
+
+
+def test_direct_dial_gate_walks_the_derived_scripts_root() -> None:
+    """Compose-baked sidecars live under scripts/, outside APP_ROOTS; the gate must walk them."""
+    from tests._walk_primitives import python_bearing_roots
+
+    derived = {REPO_ROOT / name for name in python_bearing_roots()}
+    sidecar = next(
+        root / "api_ingress_sidecar.py" for root in derived if (root / "api_ingress_sidecar.py").is_file()
+    )
+    assert sidecar in {path for path, _ in DIRECT_DIAL.trees()}, "scripts/ is outside the direct-dial gate"
+
+
+def test_sidecar_admission_is_path_exact() -> None:
+    """Only the two baked-in sidecars are admitted; a sibling sidecar is named by file:line."""
+    source = "await asyncio.open_connection('crawlutron', 8765)\n"
+    for relative in ("scripts/api_ingress_sidecar.py", "scripts/egress_proxy_sidecar.py"):
+        path = REPO_ROOT / relative
+        assert _direct_dial_offenders(parsed_source(source, filename=str(path)), path) == [], relative
+    decoy = REPO_ROOT / "scripts" / "sibling_sidecar.py"
+    assert _direct_dial_offenders(parsed_source(source, filename=str(decoy)), decoy) == [
+        f"scripts/sibling_sidecar.py:1 {_MARKER}"
+    ]
 
 
 def test_detector_bites_and_spares_lookalikes() -> None:

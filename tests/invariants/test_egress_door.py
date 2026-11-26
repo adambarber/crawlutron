@@ -147,3 +147,13 @@ def test_raw_egress_dial_is_named_by_file_and_line():
     client.get("http://example.test/") is named by file:line."""
     RAW_EGRESS_DIAL.scan()
     RAW_EGRESS_DIAL.check_bites()
+
+
+def test_egress_proxy_docstring_declares_the_sole_door() -> None:
+    """The shipped topology makes this the only egress door; no stale shadow claim."""
+    from crawlutron.transport import egress_proxy
+
+    doc = egress_proxy.__doc__ or ""
+    assert "Shadow mode" not in doc, "stale shadow-mode claim in the egress door"
+    assert "live egress paths are untouched" not in doc, "stale untouched-paths claim in the egress door"
+    assert "sole" in doc.lower() and "egress" in doc.lower(), "docstring must declare the sole egress door"

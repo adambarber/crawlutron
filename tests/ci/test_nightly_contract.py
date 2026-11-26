@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pathlib
+
+import pytest
+
 from tests.chokepoint_paths import REPO_ROOT
 
 SERVICE_ROOT = REPO_ROOT
@@ -135,61 +139,64 @@ def test_egress_default_deny_contract() -> None:
             )
 
 
-def test_egress_topology_contract() -> None:
-    """Default-deny egress topology contract: app on internal network only,
-    sidecar proxy is the sole dual-homed container (internal + egress),
-    isolated origin on egress only."""
+_TOPOLOGY_SERVICES = frozenset({"crawlutron", "egress-proxy", "api-ingress", "origin"})
+_TOPOLOGY_NETWORKS = frozenset({"internal", "egress", "ingress"})
+_ROLE_NETWORKS = {
+    "crawlutron": frozenset({"internal"}),
+    "egress-proxy": frozenset({"internal", "egress"}),
+    "api-ingress": frozenset({"internal", "ingress"}),
+    "origin": frozenset({"egress"}),
+}
 
-    import yaml
 
+def _compose_files() -> tuple[pathlib.Path, ...]:
+    """Every compose layer the fast topology gate owns, derived not hand-listed."""
     from tests._walk_primitives import discovered_files
 
-    contents = discovered_files(REPO_ROOT, "docker-compose*.yml", include_content=True)
-    base = yaml.safe_load(contents[REPO_ROOT / "docker-compose.yml"])
-    overlay = yaml.safe_load(contents[REPO_ROOT / "docker-compose.egress.yml"])
-    services = {
-        name: {**base.get("services", {}).get(name, {}), **definition}
-        for name, definition in overlay.get("services", {}).items()
-    }
-    networks = {**base.get("networks", {}), **overlay.get("networks", {})}
+    return discovered_files(REPO_ROOT, "docker-compose*.yml")
 
-    # Four services: internal app, dual-homed proxy, fixed ingress relay, isolated origin
-    expected_services = {"crawlutron", "egress-proxy", "api-ingress", "origin"}
-    assert set(services.keys()) == expected_services, (
-        f"expected services {sorted(expected_services)}; got {set(services.keys())}"
-    )
 
-    # App (crawlutron) is ONLY on internal network, no ports published
-    app = services["crawlutron"]
-    assert "ports" not in app, "crawlutron must not publish any ports"
-    app_networks = app.get("networks", [])
-    assert app_networks == ["internal"], f"crawlutron must be on internal network only; got {app_networks}"
-    # Must have EGRESS_PROXY_URL pointing to sidecar
-    env = app.get("environment", {})
-    assert "CRAWLUTRON_EGRESS_PROXY_URL" in env, "crawlutron must have CRAWLUTRON_EGRESS_PROXY_URL"
-    assert env["CRAWLUTRON_EGRESS_PROXY_URL"] == "http://egress-proxy:8888"
+def test_topology_contract_covers_every_discovered_compose_file() -> None:
+    """The fast topology gate names every overlay, not just base + egress."""
+    from tests._walk_primitives import discovered_files
 
-    # Proxy (egress-proxy) is dual-homed: internal + egress
-    proxy = services["egress-proxy"]
-    proxy_networks = proxy.get("networks", [])
-    assert set(proxy_networks) == {"internal", "egress"}, (
-        f"egress-proxy must be dual-homed (internal + egress); got {proxy_networks}"
-    )
+    attached = getattr(test_egress_topology_contract, "pytestmark", ())
+    marks = [mark for mark in attached if mark.name == "parametrize"]
+    covered = {path.name for mark in marks for path in mark.args[1]}
+    discovered = {path.name for path in discovered_files(REPO_ROOT, "docker-compose*.yml")}
+    assert covered == discovered, f"topology gate misses {sorted(discovered - covered)}"
 
-    # The API ingress relay is internal+ingress: it never reaches egress.
-    ingress = services["api-ingress"]
-    ingress_networks = ingress.get("networks", [])
-    assert set(ingress_networks) == {"internal", "ingress"}, (
-        f"api-ingress must be on internal+ingress only; got {ingress_networks}"
-    )
-    assert "ports" in ingress, "api-ingress must own the loopback host port"
 
-    # Origin is ONLY on egress network
-    origin = services["origin"]
-    origin_networks = origin.get("networks", [])
-    assert origin_networks == ["egress"], f"origin must be on egress network only; got {origin_networks}"
+@pytest.mark.parametrize("compose_path", _compose_files(), ids=lambda path: path.name)
+def test_egress_topology_contract(compose_path: pathlib.Path) -> None:
+    """Each discovered layer independently obeys the default-deny topology."""
+    import yaml
 
-    # Networks: internal is internal-only, egress and ingress are ordinary bridges
-    assert networks["internal"].get("internal") is True, "internal network must be internal-only"
-    assert networks["egress"].get("internal") is not True, "egress network must allow external access"
-    assert networks["ingress"].get("internal") is not True, "ingress network needs host port allocation"
+    document = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    services = document.get("services", {})
+    networks = document.get("networks", {})
+    assert services, f"{compose_path.name}: no services declared"
+    assert set(services) <= _TOPOLOGY_SERVICES, f"{compose_path.name}: unknown service declared"
+    assert set(networks) <= _TOPOLOGY_NETWORKS, f"{compose_path.name}: unknown network declared"
+
+    for name, definition in services.items():
+        declared = definition.get("networks")
+        if name == "crawlutron" and declared == []:
+            continue  # the dev layer detaches the app for standalone use
+        if declared:
+            assert set(declared) == _ROLE_NETWORKS[name], (
+                f"{compose_path.name}: {name} on {declared}, not {sorted(_ROLE_NETWORKS[name])}"
+            )
+        if name in {"crawlutron", "origin"}:
+            assert "ports" not in definition, f"{compose_path.name}: {name} must not publish ports"
+        env = definition.get("environment", {})
+        if name == "crawlutron" and env.get("CRAWLUTRON_EGRESS_PROXY_URL"):
+            assert env["CRAWLUTRON_EGRESS_PROXY_URL"] == "http://egress-proxy:8888"
+        if name == "api-ingress" and "ports" in definition:
+            assert definition["ports"] == ["127.0.0.1:${COMPOSE_HOST_PORT-8765}:8765"]
+
+    for name, definition in networks.items():
+        if "internal" in definition:
+            assert (definition["internal"] is True) is (name == "internal"), (
+                f"{compose_path.name}: {name} carries the wrong internal flag"
+            )
