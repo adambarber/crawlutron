@@ -113,6 +113,14 @@ class TestBiteProof:
     def test_a_single_bite_string_is_accepted_as_a_sequence_of_one(self):
         _urljoin_rule(bite=lambda: "urljoin(a, b)\n").check_bites()
 
+    def test_a_rule_declaring_no_proof_at_all_cannot_be_checked(self):
+        """A vacuous bite is the gate that reports green while governing nothing.
+
+        This is #1100's shape: the rule was declared with ``bite=lambda: ()``, the
+        audit ran zero proofs, and nothing said so."""
+        with pytest.raises(AssertionError, match="declares no bite proof"):
+            _urljoin_rule(bite=lambda: ()).check_bites()
+
 
 class TestMarkerAndCountProofs:
     """``assert_detector`` proved three things; the rule must not prove fewer.

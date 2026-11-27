@@ -6,6 +6,7 @@ import ast
 import json
 import pathlib
 import re
+import tempfile
 
 import pytest
 from pydantic import BaseModel
@@ -17,7 +18,7 @@ from crawlutron.models.render_request import RenderRequest
 from tests.chokepoint_paths import REPO_ROOT
 from tests.chokepoint_walks import canonical_tree, discovered_files
 from tests.invariants._env_knobs import _KNOB_PATTERN, _consumed_knobs
-from tests.rules import Rule
+from tests.rules import Direct, Rule
 
 _DOC_REFERENCE_EXCLUSIONS = {
     "CHANGELOG.md": "a record of what shipped; its citations name modules that were refactored away",
@@ -284,6 +285,22 @@ def _check_bare_symbol(name: str, candidate: str, symbols: dict[str, frozenset[s
     return [f"{name}: `{candidate}` names no app symbol"]
 
 
+def _ghost_citation_probe() -> list[str]:
+    """A synthetic doc citing one ghost module and one ghost bare symbol."""
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        (root / "CONTRIBUTING.md").write_text(
+            "See ``crawlutron/ghost_module.configure_service_logging``.\n"
+            "And ``_ghost_symbol`` is also gone.\n",
+            encoding="utf-8",
+        )
+        return _doc_symbol_offenders(
+            root=root,
+            documents=["CONTRIBUTING.md"],
+            symbols=_app_symbol_definitions(),
+        )
+
+
 DOC_SYMBOLS_RESOLVE_TO_DEFINITIONS = Rule(
     name="doc-symbols-resolve-to-definitions",
     find=_doc_symbol_offenders,
@@ -291,10 +308,10 @@ DOC_SYMBOLS_RESOLVE_TO_DEFINITIONS = Rule(
         "A backticked app symbol in a live doc must name something app/ actually defines, "
         "so a rename or deletion can't leave docs citing ghosts."
     ),
-    # The detector reads doc FILES (root/documents/symbols), not a canonical_tree tree, so no snippet can go
-    # through check_bites' ast.parse -- its bite and clean halves are the tmp-copy tests below.
+    # The detector reads doc FILES (root/documents/symbols), not a canonical_tree tree, so the
+    # snippet proofs cannot drive it; Direct runs the detector against a synthetic ghost doc.
     proof_path=REPO_ROOT / "CONTRIBUTING.md",
-    bite=lambda: (),
+    bite=lambda: Direct(_ghost_citation_probe, marker="names no app symbol", count=2),
     clean=None,
 )
 
