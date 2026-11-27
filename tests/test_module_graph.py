@@ -95,6 +95,14 @@ def test_a_module_form_import_still_resolves_the_module_file() -> None:
     assert _imports_of("from crawlutron.service.errors import DomainError\n") == {"crawlutron.service.errors"}
 
 
+def test_alias_resolution_never_depends_on_host_case_folding() -> None:
+    """A wrong-cased alias must not resolve through a case-insensitive disk:
+    macOS turned the Sensing class alias into a phantom package edge that
+    Linux CI correctly omitted, so the generated doc could never match both."""
+    assert module_graph._resolve("crawlutron_admit.Sensing") is None
+    assert module_graph._resolve("crawlutron_admit.sensing") is not None
+
+
 def test_the_graph_walks_every_import_root_not_just_crawlutron() -> None:
     """Wave A (#917): the graph must walk every derived import root, so a package that
     leaves core (mcp -> packages/mcp/src/crawlutron_mcp) is still walked and its seal never

@@ -386,7 +386,6 @@ graph LR
     runtime_metrics --> storage_safe_db
     runtime_pressure_sizing --> config_env
     runtime_pressure_sizing --> runtime_admit_sensing
-    runtime_pressure_sizing --> Sensing
     runtime_pressure_sizing --> gauge
     runtime_pressure_sizing --> sensing_pressure_gates
     runtime_pressure_sizing --> sensing_pressure_memory
