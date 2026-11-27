@@ -125,11 +125,14 @@ def _is_type_checking_guard(node: ast.If) -> bool:
 
 
 def build_graph() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    from tests._walk_primitives import discovered_files
+
     modules: dict[str, set[str]] = {}
     importers: dict[str, set[str]] = defaultdict(set)
     walked_any = False
+    tracked = discovered_files(REPO_ROOT, "*.py")
     for import_dir, _import_name in IMPORT_ROOTS:
-        paths = sorted(import_dir.rglob("*.py"))
+        paths = sorted(path for path in tracked if path.is_relative_to(import_dir))
         if not paths:
             raise AssertionError(
                 f"module graph walked zero modules under {import_dir}: the layering seals "
