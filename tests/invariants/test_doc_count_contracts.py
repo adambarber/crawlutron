@@ -222,8 +222,14 @@ def _expected_module_graph() -> str:
 
 
 def _graph_offenders(text: str) -> list[str]:
-    if text != _expected_module_graph():
-        return ["docs/module-graph.md: generated graph differs from the live import graph"]
+    expected = _expected_module_graph()
+    if text != expected:
+        generated, documented = set(expected.splitlines()), set(text.splitlines())
+        return [
+            "docs/module-graph.md: generated graph differs from the live import graph; "
+            f"generated-only {sorted(generated - documented)[:12]}; "
+            f"doc-only {sorted(documented - generated)[:12]}"
+        ]
     return []
 
 
