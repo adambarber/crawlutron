@@ -2,37 +2,119 @@
 
 from __future__ import annotations
 
+import ast
 from typing import cast
 
 import pytest
 
 from crawlutron.models.taxonomy import Classification
 from tests._policy_factories import canonical
+from tests._walk_primitives import canonical_tree, discovered_files, import_roots
+from tests.chokepoint_paths import REPO_ROOT
 from tests.chokepoint_walks import app_offenders
 
+#: Every generated projection, named here so a new one cannot slip in unnamed.
+GENERATED = (
+    "packages/core/src/crawlutron/models/crawl_status.py",
+    "packages/core/src/crawlutron/models/crawl_strategy.py",
+    "packages/core/src/crawlutron/models/crawl_strategy_name.py",
+    "packages/sdk/src/crawlutron_sdk/generated_taxonomies.py",
+)
 
-def test_crawl_strategy_name_members_match_vocabulary():
-    """The ``CrawlStrategyName`` Literal must not drift from the vocabulary.
 
-    mypy rejects ``Final`` inside ``Literal``, so the members are spelled out
-    and this pins them to the constants."""
-    from typing import get_args
+def test_generated_projections_are_the_source_of_the_committed_files():
+    from scripts.generate_taxonomies import render_all
 
-    from crawlutron.models.taxonomy import CrawlStrategyName
-    from crawlutron.vocabulary.strategies import (
-        BROWSER_HEADED_WARMED,
-        BROWSER_HEADLESS,
-        HTTP_CFFI_IMPERSONATE,
-        HTTP_DECLARED_CRAWLER,
-    )
+    rendered = dict(render_all(REPO_ROOT))
+    assert set(rendered) == set(GENERATED), "the generator's output set changed; name every projection"
+    for relative in GENERATED:
+        path = REPO_ROOT / relative
+        found = discovered_files(path.parent, path.name, include_content=True)
+        assert isinstance(found, dict) and path in found, f"{relative}: generated projection is missing"
+        assert found[path] == rendered[relative], (
+            f"{relative} is not the projection of its source; regenerate with scripts/generate_taxonomies.py"
+        )
 
-    declared = {
-        HTTP_DECLARED_CRAWLER,
-        HTTP_CFFI_IMPERSONATE,
-        BROWSER_HEADLESS,
-        BROWSER_HEADED_WARMED,
+
+def test_runtime_projections_derive_from_the_three_declarations():
+    from crawlutron.models.crawl_status import CrawlStatus
+    from crawlutron.models.crawl_strategy import CrawlStrategy
+    from crawlutron.models.crawl_strategy_name import CrawlStrategyName
+    from crawlutron.models.taxonomy import literal_members
+    from crawlutron.vocabulary.taxonomy import CrawlClassification, ResultStatus
+    from crawlutron_sdk.generated_taxonomies import WatchOutcome
+
+    assert {member.value for member in CrawlStatus} == literal_members(ResultStatus)
+    strategies = [member.value for member in CrawlStrategy]
+    assert set(literal_members(CrawlStrategyName)) == set(strategies)
+    assert set(literal_members(WatchOutcome)) == literal_members(CrawlClassification)
+
+
+def test_strategy_order_comes_from_the_declared_ladder():
+    from crawlutron.models.crawl_strategy import CrawlStrategy
+    from scripts.generate_taxonomies import strategy_values
+
+    assert [member.value for member in CrawlStrategy] == list(strategy_values(REPO_ROOT))
+
+
+def _declared_value_sets(tree: ast.Module) -> list[tuple[int, frozenset[str]]]:
+    """Literal[...] and StrEnum value sets with the line that declares each."""
+    found: list[tuple[int, frozenset[str]]] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "Literal"
+        ):
+            args = node.slice.elts if isinstance(node.slice, ast.Tuple) else (node.slice,)
+            values = tuple(
+                arg.value for arg in args if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+            )
+            if values and len(values) == len(args):
+                found.append((node.lineno, frozenset(values)))
+        elif isinstance(node, ast.ClassDef) and any(
+            isinstance(base, ast.Name) and base.id == "StrEnum" for base in node.bases
+        ):
+            values = tuple(
+                stmt.value.value
+                for stmt in node.body
+                if isinstance(stmt, ast.Assign)
+                and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name)
+                and isinstance(stmt.value, ast.Constant)
+                and isinstance(stmt.value.value, str)
+            )
+            if values:
+                found.append((node.lineno, frozenset(values)))
+    return found
+
+
+def test_no_second_declaration_of_a_taxonomy_survives():
+    from scripts.generate_taxonomies import classification_values, result_status_values, strategy_values
+
+    sources = {
+        "classification": frozenset(classification_values(REPO_ROOT)),
+        "status": frozenset(result_status_values(REPO_ROOT)),
+        "strategy": frozenset(strategy_values(REPO_ROOT)),
     }
-    assert set(get_args(CrawlStrategyName)) == declared
+    allowed = {
+        "packages/core/src/crawlutron/vocabulary/taxonomy.py",
+        "packages/core/src/crawlutron/vocabulary/strategies.py",
+        *GENERATED,
+    }
+    offenders: list[str] = []
+    for root in import_roots():
+        for path in sorted((REPO_ROOT / root).rglob("*.py")):
+            relative = path.relative_to(REPO_ROOT).as_posix()
+            if relative in allowed:
+                continue
+            for lineno, values in _declared_value_sets(canonical_tree(path)):
+                for name, source in sources.items():
+                    if values == source:
+                        offenders.append(f"{relative}:{lineno}: second {name} declaration")
+    assert not offenders, "a taxonomy is declared outside its source and generated projections: " + ", ".join(
+        sorted(set(offenders))
+    )
 
 
 def test_classification_alias_is_the_enum_itself():

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, cast, get_args
+from typing import TYPE_CHECKING, cast
 
 from crawlutron.models.cooldown_diagnostics import CooldownDiagnostics
 from crawlutron.models.crawl_strategy import CrawlStrategy
@@ -94,20 +94,6 @@ class _ChainState:
     cffi_retry_done: bool = False
 
 
-def _assert_strategy_names_agree() -> None:
-    """The enum and the alias are two declarations of one set of names.
-    They must agree because the ladder narrows one into the other, and nothing
-    would notice a fifth member without a matching alias (it would type-check, then hit an unhandled step).
-    """
-    enum_names = {member.value for member in CrawlStrategy}
-    alias_names = set(get_args(CrawlStrategyName))
-    if enum_names != alias_names:
-        raise RuntimeError(f"strategy name drift: enum {sorted(enum_names)} != alias {sorted(alias_names)}")
-
-
-_assert_strategy_names_agree()
-
-
 def starting_strategies(
     strategies: Iterable[CrawlStrategy],
     scheduler: DomainScheduler | None,
@@ -117,12 +103,10 @@ def starting_strategies(
     Takes the three inputs the slice reads (not the whole context), so a pin test
     does not fabricate unrelated fields to reach this line -- or re-derive it locally.
     """
-    # A static Literal cannot be derived from a runtime enum, so this narrowing is
-    # asserted -- and _assert_strategy_names_agree() is what makes asserting it honest.
     ladder: list[CrawlStrategyName] = []
     for member in strategies:
         try:
-            ladder.append(cast("CrawlStrategyName", CrawlStrategy(member).value))
+            ladder.append(CrawlStrategy(member).value)
         except ValueError as exc:
             raise ValueError(
                 f"invalid_policy_strategies: .strategy={member!r} is not a CrawlStrategy"
