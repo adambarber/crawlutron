@@ -40,7 +40,7 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
-          .venv/bin/python scripts/review_probes.py run \
+          .venv/bin/python -m scripts.review_probes run \
             --registry .github/review-agents.toml \
             --output-dir probes \
             --base "${BASE_SHA}" \
@@ -107,7 +107,7 @@ jobs:
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           PR_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
         run: |
-          .venv/bin/python scripts/agent_review.py review \
+          .venv/bin/python -m scripts.agent_review review \
             --pr-number "${PR_NUMBER}" \
             --head-sha "${PR_HEAD_SHA}" \
             --probe-dir probes \
@@ -127,7 +127,7 @@ jobs:
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           PR_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
         run: |
-          .venv/bin/python scripts/agent_review.py publish-check \
+          .venv/bin/python -m scripts.agent_review publish-check \
             --verdict verdict.json \
             --pr-number "${PR_NUMBER}" \
             --head-sha "${PR_HEAD_SHA}"
@@ -138,7 +138,7 @@ jobs:
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           PR_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
         run: |
-          .venv/bin/python scripts/agent_review.py post-review \
+          .venv/bin/python -m scripts.agent_review post-review \
             --verdict verdict.json \
             --pr-number "${PR_NUMBER}" \
             --head-sha "${PR_HEAD_SHA}"

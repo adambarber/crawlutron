@@ -14,7 +14,6 @@ from scripts.executables import require_executable
 from tests.chokepoint_paths import REPO_ROOT
 
 SERVICE_ROOT = REPO_ROOT
-AGENT_REVIEW_SCRIPT = SERVICE_ROOT / "scripts" / "agent_review.py"
 REVIEW_PROBES_SCRIPT = SERVICE_ROOT / "scripts" / "review_probes.py"
 
 
@@ -263,12 +262,12 @@ def test_probe_output_digest_mismatch_is_refused(tmp_path: Path) -> None:
 
 
 def test_agent_review_scripts_expose_their_cli() -> None:
-    for script, commands in (
-        (AGENT_REVIEW_SCRIPT, ("review", "publish-check", "post-review")),
-        (REVIEW_PROBES_SCRIPT, ("run", "structural-diff", "ci-gates", "invariants")),
+    for module, commands in (
+        ("scripts.agent_review", ("review", "publish-check", "post-review")),
+        ("scripts.review_probes", ("run", "structural-diff", "ci-gates", "invariants")),
     ):
         result = subprocess.run(
-            [sys.executable, str(script), "--help"],
+            [sys.executable, "-m", module, "--help"],
             capture_output=True,
             text=True,
             cwd=str(SERVICE_ROOT),

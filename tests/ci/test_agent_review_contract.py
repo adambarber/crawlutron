@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import tomllib
 from functools import cache
 
@@ -151,9 +152,9 @@ def test_probe_plane_checks_out_base_and_executes_base_scripts() -> None:
     )
     assert checkout_with.get("persist-credentials") is False
     run_text = _run_text(steps)
-    assert "scripts/review_probes.py run" in run_text
+    assert "-m scripts.review_probes run" in run_text
     assert "--registry .github/review-agents.toml" in run_text
-    assert "scripts/review_probes.py structural-diff" not in run_text
+    assert "scripts/review_probes.py" not in run_text
 
 
 def test_probe_plane_has_no_pull_request_head_worktree() -> None:
@@ -270,9 +271,10 @@ def test_review_plane_consumes_and_publishes_required_artifacts() -> None:
     upload_names = {_mapping(step.get("with")).get("name") for step in uploads}
     assert "agent-review-verdict" in upload_names
     run_text = _run_text(steps)
-    assert "scripts/agent_review.py review" in run_text
-    assert "scripts/agent_review.py publish-check" in run_text
-    assert "scripts/agent_review.py post-review" in run_text
+    assert "-m scripts.agent_review review" in run_text
+    assert "-m scripts.agent_review publish-check" in run_text
+    assert "-m scripts.agent_review post-review" in run_text
+    assert "scripts/agent_review.py" not in run_text
 
 
 def test_pr_publication_is_advisory_and_never_approves_or_merges() -> None:
@@ -334,3 +336,22 @@ def test_workflow_run_checkout_no_context_ref() -> None:
             ref = checkout_with.get("ref", "")
             assert isinstance(ref, str), f"Expected ref to be a string, got {type(ref)}"
             assert "${{" not in ref, f"Job '{job_name}' has context expression in ref: {ref}"
+
+
+def test_review_contract_is_not_shipped_in_the_wheel() -> None:
+    """The review contract is test tooling, not part of the production wheel."""
+    assert importlib.util.find_spec("crawlutron.review") is None
+
+
+def test_review_scripts_import_the_test_support_contract() -> None:
+    """Every review script consumes the declared support surface, not a shipped package."""
+    names = (
+        "agent_review.py",
+        "review_probes.py",
+        "review_registry.py",
+        "review_support.py",
+        "review_verdict_bounds.py",
+    )
+    for name in names:
+        text = (SERVICE_ROOT / "scripts" / name).read_text(encoding="utf-8")
+        assert "tests._support._review_contract" in text, f"{name} does not import the support contract"

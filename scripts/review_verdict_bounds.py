@@ -2,7 +2,7 @@
 
 from typing import Final
 
-from crawlutron.review.types import VerdictFinding
+from tests._support._review_contract import VerdictFinding
 
 MAX_FINDINGS: Final[int] = 200
 MAX_RATIONALE_LENGTH: Final[int] = 2_000

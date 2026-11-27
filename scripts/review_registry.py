@@ -15,7 +15,7 @@ else:
     else:
         import review_support as _support
 
-from crawlutron.review.registry import (
+from tests._support._review_contract import (
     AgentDefinition,
     ProbeDefinition,
     ReviewRegistry,
