@@ -56,7 +56,19 @@ class Silent:
     at: pathlib.Path | None = None
 
 
-Proof = Bites | Trips | Silent | str
+@dataclass(frozen=True)
+class Direct:
+    """A proof that runs a file-reading detector itself, not a parseable snippet.
+
+    A detector reading markdown cannot be driven by ``ast.parse``; this carries the
+    callable that produces its offenders, so the rule still has a firing proof."""
+
+    probe: Callable[[], Sequence[str]]
+    marker: str
+    count: int = 1
+
+
+Proof = Bites | Trips | Silent | Direct | str
 
 
 def _flat(produced: Proof | Sequence[Proof]) -> tuple[Proof, ...]:
@@ -64,7 +76,7 @@ def _flat(produced: Proof | Sequence[Proof]) -> tuple[Proof, ...]:
 
     Every consumer wanting all items goes through here rather than re-deriving
     the one-or-many branch."""
-    if isinstance(produced, (str, Bites, Trips, Silent)):
+    if isinstance(produced, (str, Bites, Trips, Silent, Direct)):
         return (produced,)
     return tuple(produced)
 
@@ -111,7 +123,9 @@ class Rule:
 
         ``at`` exists so a path-keyed detector is proved in both halves; declaring
         one half alone is the failure this refuses."""
-        placed = {proof.at for proof in self.proofs() if not isinstance(proof, str) and proof.at}
+        placed = {
+            at for proof in self.proofs() if not isinstance(proof, str) and (at := getattr(proof, "at", None))
+        }
         if not placed:
             return
         elsewhere = {self._where(item) for item in self._clean_items() if isinstance(item, Silent)}
@@ -208,8 +222,53 @@ class Rule:
                 f"be parsed proves nothing, so this is a failure of the proof, not of the rule."
             ) from exc
 
+    def _check_direct(self, proof: Direct) -> None:
+        """Run a file-reading detector's proof and name what it owed."""
+        found = list(proof.probe())
+        if not found:
+            raise AssertionError(
+                f"{self.name}: the direct proof produced no offender; the detector is "
+                f"not enforcing the property it declares."
+            )
+        if len(found) != proof.count:
+            raise AssertionError(
+                f"{self.name}: expected {proof.count} offender(s) from the direct proof, "
+                f"got {len(found)}: {found!r}"
+            )
+        if not [hit for hit in found if proof.marker in hit]:
+            raise AssertionError(
+                f"{self.name}: no direct-proof offender says {proof.marker!r}; got {found!r}"
+            )
+
+    def _check_bites_proof(self, proof: Bites) -> None:
+        found = self.offenders(self._parse(proof.source, kind="bite"), self._where(proof))
+        if not found:
+            raise AssertionError(
+                f"{self.name}: the bite proof did NOT fire on {proof.source!r}. This rule "
+                f"is enforcing nothing. Either the detector is too weak or the proof no "
+                f"longer violates the property."
+            )
+        if len(found) != proof.count:
+            raise AssertionError(
+                f"{self.name}: expected {proof.count} offender(s) for {proof.source!r}, got "
+                f"{len(found)}: {found!r}. A detector that fires several times on one "
+                f"shape is usually over-broad, and the lookalike proofs exist to catch "
+                f"that — check them before widening this rule."
+            )
+        if not [hit for hit in found if proof.marker in hit]:
+            raise AssertionError(
+                f"{self.name}: no offender for {proof.source!r} says "
+                f"{proof.marker!r} — got {found!r}. A proof that only checks firing "
+                f"is satisfied by a detector whose message has decayed into a generic "
+                f"string, which is how a gate stops explaining itself without failing."
+            )
+
     def _check_one(self, proof: Proof) -> None:
         """Run a single proof and explain, in the rule's own words, what it wanted."""
+        if isinstance(proof, Direct):
+            self._check_direct(proof)
+            return
+
         if isinstance(proof, str):
             found = self.offenders(self._parse(proof, kind="bite"), self.proof_path)
             if found:
@@ -221,28 +280,7 @@ class Rule:
             )
 
         if isinstance(proof, Bites):
-            found = self.offenders(self._parse(proof.source, kind="bite"), self._where(proof))
-            if not found:
-                raise AssertionError(
-                    f"{self.name}: the bite proof did NOT fire on {proof.source!r}. This rule "
-                    f"is enforcing nothing. Either the detector is too weak or the proof no "
-                    f"longer violates the property."
-                )
-            if len(found) != proof.count:
-                raise AssertionError(
-                    f"{self.name}: expected {proof.count} offender(s) for {proof.source!r}, got "
-                    f"{len(found)}: {found!r}. A detector that fires several times on one "
-                    f"shape is usually over-broad, and the lookalike proofs exist to catch "
-                    f"that — check them before widening this rule."
-                )
-            named = [hit for hit in found if proof.marker in hit]
-            if not named:
-                raise AssertionError(
-                    f"{self.name}: no offender for {proof.source!r} says "
-                    f"{proof.marker!r} — got {found!r}. A proof that only checks firing "
-                    f"is satisfied by a detector whose message has decayed into a generic "
-                    f"string, which is how a gate stops explaining itself without failing."
-                )
+            self._check_bites_proof(proof)
             return
 
         if isinstance(proof, Silent):
@@ -274,7 +312,15 @@ class Rule:
         property -- the worst way for a gate to lie."""
         if self.premise is not None:
             self.premise()
-        for proof in self.proofs():
+        proofs = self.proofs()
+        if not proofs:
+            raise AssertionError(
+                f"{self.name}: declares no bite proof, so the audit exercises nothing "
+                "and this rule reports green while governing nothing. Give it a proof "
+                "shape the detector can actually be driven by (Direct for file-reading "
+                "detectors), or delete the rule."
+            )
+        for proof in proofs:
             self._check_one(proof)
         for item in self._clean_items():
             if isinstance(item, Silent):
