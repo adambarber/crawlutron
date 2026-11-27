@@ -117,7 +117,7 @@ Values increment after crawl/render calls.
 `GET /v1/capabilities` → `200`. Assert:
 - `supported_strategies` = `[HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS, BROWSER_HEADED_WARMED]`
 - `supported_extractions` = `[full, trafilatura, document, dom]`
-- `supported_classifications` includes all 36 classifications (see §7).
+- `supported_classifications` equals the live `CrawlClassification` enum (see §7).
 - `default_limits` present (timeout_seconds=30, max_retries=2, max_discovered_links=250, etc.).
 - `features` object present with `recursive_frontier=true`, `captcha_solving=false`, `proxy_rotation=false`, `identity_rotation=false`, `credential_injection=false`, `headed_browser=true`, `pdf_extraction=true`, etc.
 - `output_fields`, `openapi_url=/openapi.json`, `swagger_ui_url=/docs`.
@@ -221,15 +221,12 @@ Response: `UnifiedCrawlResponse` with `results[]` of `UnifiedCrawlResult`:
 
 ---
 
-## 7. Classification Coverage (all 36)
+## 7. Classification Coverage (live enum)
 
-Assert the service can produce/each maps to a status. The contract lists:
-`rendered, captcha_detected, bot_challenge_detected, access_denied, login_required,
-paywall_detected, rate_limited, cookie_consent_required, javascript_required,
-unsupported_browser, geolocation_blocked, waf_challenge_detected, not_found, site_error,
-gone, binary_no_text, robots_disallowed, navigation_timeout, browser_crash, network_error,
-tls_error, dns_error, invalid_url, unsupported_scheme, private_network_target, unknown_error,
-not_modified`.
+Assert every `CrawlClassification` member maps to a status. The enum in
+`packages/core/src/crawlutron/vocabulary/taxonomy.py` and `GET /v1/capabilities`
+under `supported_classifications` are the authoritative value sets; do not treat
+a prose list as the contract.
 
 Mapping to test cases (representative, not all require live hostile targets):
 | TC | Classification | How evoked |
@@ -246,8 +243,8 @@ Mapping to test cases (representative, not all require live hostile targets):
 | TC-CLS-TIMEOUT-01 | `navigation_timeout` | Browser nav exceeds budget. |
 | TC-CLS-CHALLENGE-01 | `waf_challenge_detected`/`bot_challenge_detected`/`captcha_detected` | Targets exhibiting challenge markers (observed/classified, NOT solved). |
 
-All 36 values appear in `supported_classifications` (TC-CAP-01) and counters
-(`crawler_result_classification_total`) after relevant runs.
+Every `CrawlClassification` member appears in `supported_classifications`
+(TC-CAP-01) and counters (`crawler_result_classification_total`) after relevant runs.
 
 ---
 
@@ -346,7 +343,7 @@ Every externally observable capability maps to ≥1 case above:
 - 3 `discovery` toggles → TC-DISC-*
 - scoped extraction → TC-SCOPE/CSS/XPATH
 - batch + webhook → TC-BATCH/WEBHOOK-01/02
-- 36 classifications → §7
+- `CrawlClassification` members → §7
 - 6 statuses → encoded in result `status` across cases
 - web search + provider selection/errors → §9 (TC-SEARCH-01..03)
 - MCP 2026-07-28 endpoint (discover/list/call/validation/notifications) → §9 (TC-MCP-01..04)
