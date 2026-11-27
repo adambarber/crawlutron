@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from crawlutron_admit.errors import AdmissionRefused, NestedAdmitError, WrongGateError
 from crawlutron_admit.gate import AdmissionGate, Decision, DecisionKind, StallGuard
-from crawlutron_admit.gauge import GaugeState, ResourceGauge
+from crawlutron_admit.gauge import ResourceGauge
 from crawlutron_admit.policy import LaneSpec, PacingPolicy
 from crawlutron_admit.seams import Clock, Signal
 from crawlutron_admit.task_scope import (
@@ -59,7 +59,6 @@ __all__ = [
     "DecisionKind",
     "Duration",
     "FloorDivisor",
-    "GaugeState",
     "Grace",
     "Granted",
     "Handle",
