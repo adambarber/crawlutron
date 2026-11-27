@@ -59,10 +59,10 @@ class CrawlPolicy(BaseModel):
         CrawlExtractionMethod,
         Field(
             description="Output/parsing pipeline applied to the content the selected fetch strategy "
-            "retrieves. Orthogonal to the fetch strategy. FULL (default) uses the unified pipeline: "
-            "trafilatura HTML main text, markitdown for documents, plain-text passthrough. TRAFILATURA "
-            "forces HTML main-text extraction only. DOCUMENT forces markitdown document extraction for PDFs "
-            "and other non-HTML bodies. These are not strategies; pair any of them with any fetch strategy.",
+            "retrieves. Orthogonal to the fetch strategy. FULL (default) runs the unified in-house "
+            "pipeline for HTML main text, documents, and plain text. DOCUMENT selects the document "
+            "path for PDFs and other non-HTML "
+            "bodies. These are not strategies; pair any of them with any fetch strategy.",
         ),
     ] = CrawlExtractionMethod.FULL
     limits: CrawlPolicyLimits = Field(
@@ -132,15 +132,14 @@ class CrawlPolicy(BaseModel):
         str | None,
         Field(
             description="Optional CSS selector. When provided, extraction targets only the matched DOM "
-            "subtree (BeautifulSoup) and returns it as Markdown, bypassing full-page "
-            "Trafilatura/markdownify.",
+            "subtree and returns it as Markdown, bypassing the full-page main-text and document paths.",
         ),
     ] = None
     xpath: Annotated[
         str | None,
         Field(
             description="Optional XPath expression. When provided, extraction targets only the matched DOM "
-            "nodes (lxml) and returns them as Markdown, bypassing full-page Trafilatura/markdownify.",
+            "nodes and returns them as Markdown, bypassing the full-page main-text and document paths.",
         ),
     ] = None
 

@@ -353,8 +353,8 @@ def test_seed_is_fresh_requires_cache():
 _CRAWL_URL = "http://seed-batch.test/"
 
 
-# The sitemap seed-batch policy: same chain, HTML main-text extraction only.
-_POLICY_SEED_BATCH = partial(_policy, extraction="trafilatura")
+# The sitemap seed-batch policy: same chain, default extraction.
+_POLICY_SEED_BATCH = partial(_policy, extraction="full")
 
 
 class _RecordingCache:

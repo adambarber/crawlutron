@@ -14,6 +14,8 @@ import time
 
 import httpx
 
+from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
+
 from .client import CrawlClient, CrawlClientError
 from .docker import run_up
 from .output import write_body
@@ -38,7 +40,7 @@ _CLIENT_BODY_CAP = 16 * 1024 * 1024
 _OUTPUT_FORMATS = ("json", "jsonl", "ndjson", "markdown", "csv")
 _DEEP_CRAWL_MODES = ("none", "bfs")
 _EXIT_ON_MODES = ("none", "partial", "any")
-_EXTRACTION_METHODS = ("full", "trafilatura", "document", "dom")
+_EXTRACTION_METHODS = tuple(member.value for member in CrawlExtractionMethod)
 
 
 def _print_help() -> None:

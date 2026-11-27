@@ -85,7 +85,7 @@ class UnifiedCrawlResult(BaseModel):
     extraction_method: Annotated[
         str | None,
         Field(
-            description="http_html, dom_text, pdf_text, trafilatura_extract, etc.",
+            description="http_html, dom_text, pdf_text, document_extract, etc.",
         ),
     ] = None
     # Open by design: browser worker metadata passes through; the internal

@@ -60,7 +60,7 @@ commit CI just passed:
 | `released` | nothing (gate only) | `scripts/release_roster.py --released` derives the released set from the tags at HEAD |
 | `publish` | one package per matrix job (sdist + wheel) to **PyPI** | asserts the built wheel's `Version` equals the tag, then `twine check --strict`; `skip-existing` resumes a partial upload |
 | `install-graph` | nothing | installs the just-published `name==version` from the index in a clean venv and runs `pip check`; for `crawlutron` it also imports every member |
-| `image` | the `runtime` image to **GHCR** | only when the root released; runs the image before pushing, asserting the baked `crawlutron.__version__` equals the root version |
+| `image` | the `runtime` image to **GHCR** | only when the root released; runs the image before pushing, asserting the baked root distribution via `version('crawlutron')` equals the tag (not `crawlutron.__version__`, which reads core metadata) |
 | `sbom` | a CycloneDX SBOM attached to each package's release | built from the frozen lock |
 
 Publishing is one matrix job per package with `max-parallel: 1`, so uploads are

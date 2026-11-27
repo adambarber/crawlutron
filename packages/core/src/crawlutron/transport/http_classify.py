@@ -14,11 +14,7 @@ from crawlutron.transport import body_decode
 from crawlutron.transport.content_pipeline import run_extraction
 from crawlutron.transport.decompression import decompress_body as _decompress_body
 from crawlutron.transport.http_response import ExtractedHttpContent, FetchedResponse, HttpStrategyContext
-from crawlutron.vocabulary.extraction import (
-    EXTRACTION_METHOD_HTTP_BODY,
-    EXTRACTION_METHOD_HTTP_HTML,
-    EXTRACTION_TRAFILATURA,
-)
+from crawlutron.vocabulary.extraction import EXTRACTION_METHOD_HTTP_BODY, EXTRACTION_METHOD_HTTP_HTML
 
 __all__ = [
     "classify_extracted_content",
@@ -133,14 +129,4 @@ async def classify_extracted_content(
     if override is not None and (status != 403 or classification == "rendered"):
         classification = override[1]
         evidence = _status_evidence(classification, override[2], status)
-    if ctx.extraction == EXTRACTION_TRAFILATURA and extracted.html is None and classification == "rendered":
-        evidence = [
-            ClassificationEvidenceRecord(
-                classification=Classification.binary_no_text,
-                signature="non_html_body",
-                source="content_type",
-                context=extracted.content_type or "",
-            )
-        ]
-        classification = Classification.binary_no_text
     return classification, evidence

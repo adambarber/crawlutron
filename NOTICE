@@ -42,7 +42,7 @@ each distribution's own metadata.
     httpx, lxml, uvicorn
 
   Apache-2.0
-    pytest-asyncio, trafilatura, yoyo-migrations, types-lxml, types-PyYAML,
+    pytest-asyncio, yoyo-migrations, types-lxml, types-PyYAML,
     types-regex
 
   MPL-2.0

@@ -1,12 +1,16 @@
-"""README count and tool-list claims stay derived from the live enum and registry."""
+"""Public doc claims stay derived from live enums, manifests, and generators."""
 
 from __future__ import annotations
 
 import pathlib
 import re
+from functools import lru_cache
 
+from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
+from crawlutron.vocabulary.extraction import EXTRACTION_DESCRIPTIONS
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from crawlutron_mcp.registry import TOOL_SPECS
+from scripts import module_graph
 from tests._walk_primitives import discovered_files
 from tests.chokepoint_paths import REPO_ROOT
 
@@ -113,3 +117,239 @@ def test_stale_claim_detectors_bite(tmp_path: pathlib.Path):
     assert "README hardcodes 4 MCP tools; live registry has 18" in offenders
     assert len(offenders) == 4, offenders
     assert any("hand-lists MCP tools" in item for item in _listed_tool_offenders(text))
+
+
+_ACTIVE_DOCS = (
+    "README.md",
+    "SECURITY.md",
+    "docs/RELEASE.md",
+    "docs/architecture-governance.md",
+    "docs/references/crawlutron-agent-contract.md",
+    "docs/references/crawlutron-manual-test-plan.md",
+    "docs/module-graph.md",
+)
+_BACKTICK = re.compile(r"`[^`\n]*`")
+_REMOVED_LIBS = ("markitdown", "markdownify")
+_DELETED_METHOD = "trafilatura"
+_LIVE_DELETED_METHOD_SOURCES = (
+    "NOTICE",
+    "packages/core/src/crawlutron/vocabulary/extraction.py",
+    "packages/core/src/crawlutron/models/crawl_extraction_method.py",
+    "packages/core/src/crawlutron/models/crawl_policy.py",
+    "packages/core/src/crawlutron/models/unified_crawl_result.py",
+    "packages/core/src/crawlutron/transport/http_classify.py",
+    "packages/rest/src/crawlutron_rest/main.py",
+    "packages/rest/src/crawlutron_rest/api/crawl_router.py",
+    "packages/rest/src/crawlutron_rest/cli/__main__.py",
+    "packages/rest/src/crawlutron_rest/discovery/agent_hints.py",
+    "packages/rest/src/crawlutron_rest/discovery/capabilities.py",
+    "packages/mcp/src/crawlutron_mcp/registry.py",
+)
+_FAIL_UNDER = re.compile(r"--cov-fail-under=(\d+)")
+_SMOKE_VERSION = re.compile(r"version\(['\"]crawlutron['\"]\)")
+
+
+def _removed_from_lock() -> tuple[str, ...]:
+    lock = _read("uv.lock").lower()
+    return tuple(name for name in _REMOVED_LIBS if f'name = "{name}"' in lock)
+
+
+def _stale_extraction_offenders(text: str, document: str) -> list[str]:
+    offenders: list[str] = []
+    for number, raw in enumerate(text.splitlines(), start=1):
+        prose = _BACKTICK.sub("", raw).lower()
+        for name in _REMOVED_LIBS:
+            if re.search(rf"\b{name}\b", prose):
+                offenders.append(f"{document}:{number}: names removed extraction library {name!r}")
+    return offenders
+
+
+def _description_offenders(descriptions: dict[str, str]) -> list[str]:
+    return [
+        f"EXTRACTION_DESCRIPTIONS[{key}]: names removed library {name!r}"
+        for key, description in descriptions.items()
+        for name in _REMOVED_LIBS
+        if re.search(rf"\b{name}\b", description, re.I)
+    ]
+
+
+def _production_offenders() -> list[str]:
+    sources = (
+        "packages/core/src/crawlutron/vocabulary/extraction.py",
+        "packages/core/src/crawlutron/models/crawl_policy.py",
+        "packages/core/src/crawlutron/models/crawl_extraction_method.py",
+    )
+    return [
+        f"{relative}: names removed library {name!r}"
+        for relative in sources
+        for name in ("markitdown", "markdownify")
+        if re.search(rf"\b{name}\b", _read(relative), re.I)
+    ]
+
+
+def _coverage_offenders(text: str, document: str) -> list[str]:
+    match = _FAIL_UNDER.search(_read(".pre-commit-config.yaml"))
+    if match is None:
+        return [".pre-commit-config.yaml: no --cov-fail-under floor to document"]
+    if "[![codecov]" not in _read("README.md"):
+        return []
+    offenders: list[str] = []
+    if re.search(r"no coverage badge", text, re.I):
+        offenders.append(f"{document}: denies the live codecov badge")
+    if f"{match.group(1)}%" not in text:
+        offenders.append(f"{document}: does not state the enforced {match.group(1)}% floor")
+    if "coverage-floors.json" not in text:
+        offenders.append(f"{document}: does not name coverage-floors.json")
+    return offenders
+
+
+def _release_offenders(text: str) -> list[str]:
+    probe = _SMOKE_VERSION.search(_read("scripts/release/image.py"))
+    assert probe, "release smoke probe changed; re-derive this gate"
+    offenders: list[str] = []
+    if probe.group(0) not in text:
+        offenders.append("docs/RELEASE.md: does not name the live smoke version probe")
+    for number, raw in enumerate(text.splitlines(), start=1):
+        if re.search(r"crawlutron\.__version__[^|\n]{0,80}equals", raw, re.I):
+            offenders.append(f"docs/RELEASE.md:{number}: claims __version__ is the root-version probe")
+    return offenders
+
+
+@lru_cache(maxsize=1)
+def _expected_module_graph() -> str:
+    modules, _importers = module_graph.build_graph()
+    return f"```mermaid\n{module_graph.mermaid(modules)}\n```\n"
+
+
+def _graph_offenders(text: str) -> list[str]:
+    expected = _expected_module_graph()
+    if text != expected:
+        generated, documented = set(expected.splitlines()), set(text.splitlines())
+        return [
+            "docs/module-graph.md: generated graph differs from the live import graph; "
+            f"generated-only {sorted(generated - documented)[:12]}; "
+            f"doc-only {sorted(documented - generated)[:12]}"
+        ]
+    return []
+
+
+def _extraction_list_offenders(text: str) -> list[str]:
+    match = re.search(r"supported_extractions`?\s*=\s*`\[([^\]]+)\]`", text)
+    expected = [method.value for method in CrawlExtractionMethod]
+    if match is None:
+        return ["manual plan: supported_extractions assertion is missing"]
+    listed = [item.strip() for item in match.group(1).split(",")]
+    if listed != expected:
+        return [f"manual plan: supported_extractions {listed} != live {expected}"]
+    return []
+
+
+def test_active_docs_name_no_removed_extraction_library():
+    failures = [f"{name!r} is back in uv.lock" for name in _removed_from_lock()]
+    failures.extend(
+        hit for relative in _ACTIVE_DOCS for hit in _stale_extraction_offenders(_read(relative), relative)
+    )
+    assert not failures, "; ".join(failures)
+
+
+def test_active_docs_gate_bites_a_reintroduced_library_claim():
+    planted = "`full` — Unified pipeline (markitdown for documents)."
+    offenders = _stale_extraction_offenders(planted, "README.md")
+    assert any("names removed extraction library" in hit for hit in offenders), offenders
+
+
+def test_discovery_descriptions_name_no_removed_extraction_library():
+    assert not (failures := _description_offenders(dict(EXTRACTION_DESCRIPTIONS))), "; ".join(failures)
+
+
+def test_discovery_descriptions_gate_bites_a_planted_claim():
+    planted = {**dict(EXTRACTION_DESCRIPTIONS), "full": "markitdown for documents"}
+    assert any("names removed library 'markitdown'" in hit for hit in _description_offenders(planted))
+
+
+def test_extraction_source_names_no_removed_library():
+    assert not (failures := _production_offenders()), "; ".join(failures)
+
+
+def test_coverage_claims_match_the_enforced_floor():
+    failures = [
+        hit
+        for relative in ("README.md", "docs/architecture-governance.md")
+        for hit in _coverage_offenders(_read(relative), relative)
+    ]
+    assert not failures, "; ".join(failures)
+
+
+def test_coverage_gate_bites_a_stale_no_badge_refusal():
+    planted = "No coverage badge or coverage ratchet is claimed. No threshold, no fail-under."
+    offenders = _coverage_offenders(planted, "docs/architecture-governance.md")
+    assert any("denies the live codecov badge" in hit for hit in offenders), offenders
+
+
+def test_release_smoke_names_the_live_version_probe():
+    assert not (failures := _release_offenders(_read("docs/RELEASE.md"))), "; ".join(failures)
+
+
+def test_release_smoke_gate_bites_a_false_version_claim():
+    planted = "asserting the baked `crawlutron.__version__` equals the root version"
+    assert any("claims __version__ is the root-version probe" in hit for hit in _release_offenders(planted))
+
+
+def test_module_graph_matches_the_generated_import_graph():
+    assert not (failures := _graph_offenders(_read("docs/module-graph.md"))), "; ".join(failures)
+
+
+def test_module_graph_gate_bites_a_stale_edge():
+    planted = _expected_module_graph().replace("```mermaid\n", "```mermaid\n    stale --> edge\n", 1)
+    assert any("generated graph differs" in hit for hit in _graph_offenders(planted))
+
+
+def test_manual_plan_extraction_list_matches_the_live_enum():
+    plan = _read("docs/references/crawlutron-manual-test-plan.md")
+    assert not (failures := _extraction_list_offenders(plan)), "; ".join(failures)
+
+
+def test_manual_plan_extraction_list_gate_bites_a_planted_value():
+    plan = _read("docs/references/crawlutron-manual-test-plan.md")
+    planted = plan.replace("dom]", "dom, extra]", 1)
+    assert any("!= live" in hit for hit in _extraction_list_offenders(planted))
+
+
+def _deleted_text_offenders(text: str, document: str) -> list[str]:
+    return [
+        f"{document}:{number}: revived deleted extraction value {_DELETED_METHOD!r}"
+        for number, raw in enumerate(text.splitlines(), start=1)
+        if _DELETED_METHOD in raw.lower()
+    ]
+
+
+def _deleted_method_offenders() -> list[str]:
+    offenders = [
+        f"CrawlExtractionMethod: revived deleted value {method.value!r}"
+        for method in CrawlExtractionMethod
+        if _DELETED_METHOD in method.value.lower()
+    ]
+    offenders.extend(
+        f"EXTRACTION_DESCRIPTIONS[{key}]: revived deleted value"
+        for key, description in EXTRACTION_DESCRIPTIONS.items()
+        if _DELETED_METHOD in key.lower() or _DELETED_METHOD in description.lower()
+    )
+    for relative in _LIVE_DELETED_METHOD_SOURCES + _ACTIVE_DOCS:
+        offenders.extend(_deleted_text_offenders(_read(relative), relative))
+    return offenders
+
+
+def test_deleted_extraction_value_is_absent_from_live_surfaces():
+    assert not (failures := _deleted_method_offenders()), "; ".join(failures)
+
+
+def test_deleted_extraction_value_gate_bites_a_documented_value():
+    planted = "- `trafilatura` — HTML-only main-text path; documents are not parsed."
+    offenders = _deleted_text_offenders(planted, "README.md")
+    assert any("revived deleted extraction value" in hit for hit in offenders), offenders
+
+
+def test_deleted_extraction_value_gate_bites_a_source_value():
+    planted = 'EXTRACTION_TRAFILATURA: str = "trafilatura"'
+    offenders = _deleted_text_offenders(planted, "packages/core/src/crawlutron/vocabulary/extraction.py")
+    assert any("revived deleted extraction value" in hit for hit in offenders), offenders

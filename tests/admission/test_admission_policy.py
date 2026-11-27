@@ -146,12 +146,11 @@ class TestPolicyDerivation:
 
 
 class TestHTTPTaskRamEstimate:
-    """The per-HTTP-task estimate must cover a real task — a max-length
-    body plus the trafilatura/lxml parse state — or admission over-grants and
-    the box swaps. 12 MiB measured optimistic at the review's live scale."""
+    """The per-HTTP-task estimate must cover a max-length body plus HTML
+    parser working state, or admission over-grants and the box swaps."""
 
     def test_default_covers_a_max_body_plus_parse_state(self):
-        # A 10 MiB body plus lxml/trafilatura working set is 40+ MiB in practice.
+        # A 10 MiB body plus the HTML parser working set is 40+ MiB in practice.
         assert TaskRamBudget().http_task_bytes >= 48 * 1024 * 1024
 
     def test_http_ceiling_uses_the_same_bytes_as_admission(self):

@@ -63,7 +63,7 @@ def _make_engine_result(url: str) -> EngineCrawlResult:
         content_type="text/html",
         html="<html>test</html>",
         text="test",
-        extraction_method="trafilatura",
+        extraction_method="http_html",
         quality_score=1.0,
         discovered_links=(),
         error=None,

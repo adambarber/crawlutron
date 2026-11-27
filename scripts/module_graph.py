@@ -11,6 +11,7 @@ import ast
 import pathlib
 import sys
 from collections import defaultdict
+from functools import cache
 
 from utils.paths import REPO_ROOT
 
@@ -57,6 +58,25 @@ def _module_name(path: pathlib.Path, import_dir: pathlib.Path) -> str:
     return ".".join(parts)
 
 
+@cache
+def _exact_path(path: pathlib.Path) -> bool:
+    """True only if each component keeps this exact spelling.
+
+    Case-folding exists() invents macOS-only edges CI never sees."""
+    current = pathlib.Path(path.anchor) if path.anchor else pathlib.Path(".")
+    for part in path.parts:
+        if part == path.anchor:
+            continue
+        try:
+            names = {entry.name for entry in current.iterdir()}
+        except OSError:
+            return False
+        if part not in names:
+            return False
+        current = current / part
+    return True
+
+
 def _resolve(name: str, package_ok: bool = True) -> str | None:
     """Map an imported name to a module file or package dir, or None if not ours."""
     root = name.split(".")[0]
@@ -64,10 +84,12 @@ def _resolve(name: str, package_ok: bool = True) -> str | None:
         return None
     for member in _MEMBERS:
         candidate = member / name.replace(".", "/")
-        if candidate.with_suffix(".py").exists():
+        source = candidate.with_suffix(".py")
+        if _exact_path(source) and source.is_file():
             return name
-        if package_ok and candidate.is_dir() and any(candidate.rglob("*.py")):
-            return name
+        if package_ok and _exact_path(candidate) and candidate.is_dir():
+            if any(candidate.rglob("*.py")):
+                return name
     # Third-party (fastapi, starlette, ...): record the top-level distribution
     # root so seals see external reach; a walked-internal miss is not one.
     if root in _IMPORT_NAMES:
@@ -125,11 +147,14 @@ def _is_type_checking_guard(node: ast.If) -> bool:
 
 
 def build_graph() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    from tests._walk_primitives import discovered_files
+
     modules: dict[str, set[str]] = {}
     importers: dict[str, set[str]] = defaultdict(set)
     walked_any = False
+    tracked = discovered_files(REPO_ROOT, "*.py")
     for import_dir, _import_name in IMPORT_ROOTS:
-        paths = sorted(import_dir.rglob("*.py"))
+        paths = sorted(path for path in tracked if path.is_relative_to(import_dir))
         if not paths:
             raise AssertionError(
                 f"module graph walked zero modules under {import_dir}: the layering seals "

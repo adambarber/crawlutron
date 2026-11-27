@@ -95,6 +95,14 @@ def test_a_module_form_import_still_resolves_the_module_file() -> None:
     assert _imports_of("from crawlutron.service.errors import DomainError\n") == {"crawlutron.service.errors"}
 
 
+def test_alias_resolution_never_depends_on_host_case_folding() -> None:
+    """A wrong-cased alias must not resolve through a case-insensitive disk:
+    macOS turned the Sensing class alias into a phantom package edge that
+    Linux CI correctly omitted, so the generated doc could never match both."""
+    assert module_graph._resolve("crawlutron_admit.Sensing") is None
+    assert module_graph._resolve("crawlutron_admit.sensing") is not None
+
+
 def test_the_graph_walks_every_import_root_not_just_crawlutron() -> None:
     """Wave A (#917): the graph must walk every derived import root, so a package that
     leaves core (mcp -> packages/mcp/src/crawlutron_mcp) is still walked and its seal never
@@ -120,3 +128,21 @@ def test_the_walk_pins_each_canonical_package_root_vs_a_vanishing_member() -> No
         "the module graph no longer walks these canonical package roots; a vanished "
         "root's sealed layer would green over empty (not walked: " + repr(not_walked) + ")"
     )
+
+
+def test_only_discovered_sources_enter_the_graph(tmp_path, monkeypatch) -> None:
+    """A transient untracked .py under a package must not change the graph:
+    CI's randomized order otherwise lets an earlier test pollute the walk and
+    reddens the generated-graph gate for reasons unrelated to the commit."""
+    root = tmp_path / "crawlutron"
+    root.mkdir()
+    tracked = root / "tracked.py"
+    tracked.write_text("x = 1\n", encoding="utf-8")
+    (root / "untracked.py").write_text("from crawlutron import tracked\n", encoding="utf-8")
+    monkeypatch.setattr(module_graph, "IMPORT_ROOTS", ((root, "crawlutron"),))
+    monkeypatch.setattr(module_graph, "_MEMBERS", (tmp_path,))
+    monkeypatch.setattr(module_graph, "_IMPORT_NAMES", {"crawlutron"})
+    monkeypatch.setattr("tests._walk_primitives.discovered_files", lambda _root, _pattern: (tracked,))
+    modules, _importers = build_graph()
+    assert "crawlutron.tracked" in modules
+    assert "crawlutron.untracked" not in modules

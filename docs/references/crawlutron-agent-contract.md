@@ -77,7 +77,7 @@ and callers should treat it as backpressure; it is not proof that the process
 crashed. Confirm process liveness with `/health` and back off, queue, or retry
 later when `/ready` reports `ready`.
 
-Blocking direct HTTP fetches, document extraction, Trafilatura extraction, and
+Blocking direct HTTP fetches, document extraction, main-text extraction, and
 synchronous browser work are offloaded from the FastAPI event loop. This
 preserves `/health` responsiveness while crawls run, but it does not make
 individual crawl requests instantaneous; caller read timeouts still need to
@@ -96,9 +96,8 @@ Supported strategy names (fetch strategies):
 
 Supported extraction methods (parsing pipelines, orthogonal to fetch strategy):
 
-- `full` — Unified pipeline (trafilatura for HTML, markitdown for documents, plain-text passthrough)
-- `trafilatura` — Forces HTML main-text extraction only
-- `document` — Forces markitdown document extraction for PDFs and non-HTML bodies
+- `full` — Unified in-house pipeline (HTML main text, documents, plain text)
+- `document` — Forces the in-house document path for PDFs and non-HTML bodies
 - `dom` — DOM text extraction (browser-rendered pages)
 
 Policy fields agents may send:

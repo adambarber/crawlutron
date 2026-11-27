@@ -116,7 +116,7 @@ Values increment after crawl/render calls.
 ### TC-CAP-01 — Capabilities contract
 `GET /v1/capabilities` → `200`. Assert:
 - `supported_strategies` = `[HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS, BROWSER_HEADED_WARMED]`
-- `supported_extractions` = `[full, trafilatura, document, dom]`
+- `supported_extractions` = `[full, document, dom]`
 - `supported_classifications` equals the live `CrawlClassification` enum (see §7).
 - `default_limits` present (timeout_seconds=30, max_retries=2, max_discovered_links=250, etc.).
 - `features` object present with `recursive_frontier=true`, `captcha_solving=false`, `proxy_rotation=false`, `identity_rotation=false`, `credential_injection=false`, `headed_browser=true`, `pdf_extraction=true`, etc.
@@ -149,7 +149,7 @@ Response: `UnifiedCrawlResponse` with `results[]` of `UnifiedCrawlResult`:
 ### 6.1 Strategy coverage
 | TC | Strategy(s) | Expectation |
 |---|---|---|
-| TC-CRAWL-HTTP-01 | `[HTTP_DECLARED_CRAWLER]` | Direct HTTP; `selected_strategy=HTTP_DECLARED_CRAWLER`; `extraction_method=http_html` or `trafilatura_extract`; markdown present. |
+| TC-CRAWL-HTTP-01 | `[HTTP_DECLARED_CRAWLER]` | Direct HTTP; `selected_strategy=HTTP_DECLARED_CRAWLER`; `extraction_method=http_html` or `document_extract`; markdown present. |
 | TC-CRAWL-CFFI-01 | `[HTTP_CFFI_IMPERSONATE]` | curl_cffi chrome124 impersonation; `selected_strategy=HTTP_CFFI_IMPERSONATE`; browser-like UA/headers applied. |
 | TC-CRAWL-BR-01 | `[BROWSER_HEADLESS]` | Camoufox headless render; `selected_strategy=BROWSER_HEADLESS`; JS-rendered content captured. |
 | TC-CRAWL-BRW-01 | `[BROWSER_HEADED_WARMED]` | Headed Firefox with warmup URL before target; `selected_strategy=BROWSER_HEADED_WARMED`. |
@@ -158,10 +158,9 @@ Response: `UnifiedCrawlResponse` with `results[]` of `UnifiedCrawlResult`:
 ### 6.2 Extraction coverage
 | TC | `extraction` | Expectation |
 |---|---|---|
-| TC-EXTR-FULL-01 | `full` (default) | Trafilatura main text + markitdown for docs + plain-text passthrough. |
-| TC-EXTR-TRAF-01 | `trafilatura` | HTML-only main text; non-HTML bodies not document-parsed. |
-| TC-EXTR-DOC-01 | `document` | PDF/non-HTML parsed via markitdown when text evidence needed. |
-| TC-EXTR-DOM-01 | `dom` | DOM-text passthrough (no Trafilatura/markitdown). |
+| TC-EXTR-FULL-01 | `full` (default) | In-house main text + document path + plain-text passthrough. |
+| TC-EXTR-DOC-01 | `document` | PDF/non-HTML parsed by the in-house extractor when text evidence needed. |
+| TC-EXTR-DOM-01 | `dom` | DOM-text passthrough (no main-text or document path). |
 
 ### 6.3 Policy `limits` coverage
 | TC | Field | Expectation |
@@ -209,7 +208,7 @@ Response: `UnifiedCrawlResponse` with `results[]` of `UnifiedCrawlResult`:
 | TC | Field | Expectation |
 |---|---|---|
 | TC-SCOPE-01 | `scope_regex` | Discovered links not matching regex are dropped. |
-| TC-CSS-01 | `css_selector` | Extraction targets matched DOM subtree → Markdown; full-page Trafilatura/markdownify bypassed. |
+| TC-CSS-01 | `css_selector` | Extraction targets matched DOM subtree → Markdown; full-page main-text/document paths bypassed. |
 | TC-XPATH-01 | `xpath` | Extraction targets matched nodes (lxml) → Markdown. |
 
 ### 6.8 Batch & webhook
