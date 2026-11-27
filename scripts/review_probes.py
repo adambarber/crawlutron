@@ -27,8 +27,7 @@ else:
         import review_registry as _registry
         import review_support as _support
 
-from crawlutron.review.probes import ProbeArtifact
-from crawlutron.review.support import ProbeResultRecord, probe_exit_code
+from tests._support._review_contract import ProbeArtifact, ProbeResultRecord, probe_exit_code
 
 SHA_PATTERN: Final[re.Pattern[str]] = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 _REPOSITORY_SEGMENT: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_.-]+")

@@ -4,10 +4,12 @@ import ast
 import pathlib
 from collections.abc import Iterator
 
-from tests.chokepoint_walks import from_imports, offender_at, plain_imports
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import from_imports, offender_at, plain_imports, trees_under
 from tests.rules import Bites, Registry, Rule
 from tests.trees import test_tree_module_names as _test_tree_module_names
 from tests.trees import tree_under_tests as _tests_tree
+from utils.paths import member_src_roots
 
 # Measured on tests/invariants/ alone: 37.7s of a 49.4s file, led by
 # test_property_registry_fingerprints_are_observed 8.06s, test_documented_browser_knobs_have_consumers
@@ -45,6 +47,41 @@ def _bare_sibling_import_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     ]
 
 
+def _review_support_imports(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Shipped code reaching the review support contract."""
+    return [
+        offender_at(path, node, "imports review support from shipped code")
+        for node, module in _imported_modules(tree)
+        if module == "tests._support._review_contract" or module.startswith("crawlutron.review")
+    ]
+
+
+def _shipped_trees(*, exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
+    """Every shipped source tree, derived from the workspace members."""
+    return tuple((path, tree) for root in member_src_roots() for path, tree in trees_under(root))
+
+
+REVIEW_SUPPORT_IS_TEST_ONLY = Rule(
+    name="review-support-is-test-only",
+    find=_review_support_imports,
+    summary="review support is developer tooling; a shipped package must not import it",
+    scope=_shipped_trees,
+    bite=lambda: Bites(
+        "from crawlutron.review.types import Verdict\n"
+        "from tests._support._review_contract import Verdict\n"
+        "import crawlutron.review.support\n",
+        marker="imports review support from shipped code",
+        count=3,
+    ),
+    clean=lambda: [
+        "from __future__ import annotations\n",
+        "from crawlutron.admission.policy import read_policy\n",
+        "from utils.paths import member_src_roots\n",
+    ],
+    proof_path=REPO_ROOT / "tests" / "invariants" / "_synthetic.py",
+)
+
+
 TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
     name="test-helpers-imported-by-package-path",
     find=_bare_sibling_import_offenders,
@@ -75,7 +112,7 @@ TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
 )
 
 
-RULES = Registry((TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH,))
+RULES = Registry((TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH, REVIEW_SUPPORT_IS_TEST_ONLY))
 
 
 def test_no_rule_violations():

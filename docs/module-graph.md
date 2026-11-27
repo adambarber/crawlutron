@@ -377,7 +377,6 @@ graph LR
     orchestration_strategy_chain --> transport_strategy_request
     orchestration_strategy_chain --> vocabulary_strategies
     orchestration_strategy_chain --> vocabulary_taxonomy
-    review_probes --> review_support
     runtime_admit_sensing --> runtime_process_state
     runtime_admit_sensing --> sensing_cgroup_sense
     runtime_logging_config --> safety_json_safe

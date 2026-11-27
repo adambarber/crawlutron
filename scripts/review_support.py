@@ -9,7 +9,7 @@ from typing import Final, TypeGuard
 
 import httpx as _httpx
 
-from crawlutron.review.support import (
+from tests._support._review_contract import (
     ProbeResultRecord,
     probe_argv,
     probe_duration_ms,

@@ -25,7 +25,7 @@ else:
         import review_support as _support
         from review_verdict_bounds import cap_findings, truncate_rationale
 
-from crawlutron.review.types import Verdict, VerdictFinding
+from tests._support._review_contract import Verdict, VerdictFinding
 
 NVIDIA_CHAT_URL: Final[str] = "https://integrate.api.nvidia.com/v1/chat/completions"
 VERDICTS: Final[frozenset[str]] = frozenset({"APPROVE", "REQUEST_CHANGES"})

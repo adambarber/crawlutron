@@ -16,7 +16,6 @@ from tests.chokepoint_paths import REPO_ROOT
 
 SERVICE_ROOT = REPO_ROOT
 REGISTRY_PATH = SERVICE_ROOT / ".github" / "review-agents.toml"
-AGENT_REVIEW_SCRIPT = SERVICE_ROOT / "scripts" / "agent_review.py"
 REVIEW_PROBES_SCRIPT = SERVICE_ROOT / "scripts" / "review_probes.py"
 
 
@@ -33,7 +32,8 @@ def _run_review(env: dict[str, str], probe_dir: Path, output_path: Path) -> subp
     return subprocess.run(
         [
             sys.executable,
-            str(AGENT_REVIEW_SCRIPT),
+            "-m",
+            "scripts.agent_review",
             "review",
             "--pr-number",
             "1",
