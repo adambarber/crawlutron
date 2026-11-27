@@ -9,6 +9,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from crawlutron_sdk.generated_taxonomies import WatchOutcome
+
 
 class _UrlSource(BaseModel):
     """Shared exactly-one-of url/urls base for request models."""
@@ -303,52 +305,7 @@ class WatchState(BaseModel):
     validators: dict[str, object] = Field(default_factory=dict)
     next_check_at: float
     last_checked_at: Annotated[float | None, Field(default=None)] = None
-    last_outcome: Annotated[
-        Literal[
-            "rendered",
-            "captcha_detected",
-            "bot_challenge_detected",
-            "access_denied",
-            "login_required",
-            "paywall_detected",
-            "rate_limited",
-            "cookie_consent_required",
-            "javascript_required",
-            "unsupported_browser",
-            "geolocation_blocked",
-            "waf_challenge_detected",
-            "not_found",
-            "site_error",
-            "gone",
-            "binary_no_text",
-            "robots_disallowed",
-            "navigation_timeout",
-            "browser_crash",
-            "network_error",
-            "connection_error",
-            "http_status_error",
-            "url_budget_exceeded",
-            "browser_pool_exhausted",
-            "circuit_breaker_open",
-            "admission_stalled",
-            "payload_too_large",
-            "too_many_redirects",
-            "http_error",
-            "value_error",
-            "tls_error",
-            "dns_error",
-            "invalid_url",
-            "unsupported_scheme",
-            "private_network_target",
-            "host_denied",
-            "host_not_allowed",
-            "userinfo_refused",
-            "unknown_error",
-            "not_modified",
-        ]
-        | None,
-        Field(default=None),
-    ] = None
+    last_outcome: Annotated[WatchOutcome | None, Field(default=None)] = None
     last_changed_at: Annotated[float | None, Field(default=None)] = None
     consecutive_failures: int = 0
     created_at: float

@@ -1,6 +1,6 @@
 """The vocabulary a crawl result is written in: ``Classification`` (the StrEnum,
 re-exported here as the single spelling), ``CrawlError``, and
-``CrawlStrategyName``; the runtime set is DERIVED from these.
+``CrawlStrategyName`` (generated from the same home); the runtime set is DERIVED from these.
 """
 
 from __future__ import annotations
@@ -9,7 +9,17 @@ import enum
 import types
 from typing import Literal, Union, get_args, get_origin
 
+from crawlutron.models.crawl_strategy_name import CrawlStrategyName
 from crawlutron.vocabulary.taxonomy import CrawlClassification
+
+__all__ = [
+    "Classification",
+    "CrawlError",
+    "CrawlStrategyName",
+    "PIPELINE_ONLY_CRAWL_ERRORS",
+    "as_classification",
+    "literal_members",
+]
 
 # ``X | Y`` and ``Union[X, Y]`` are the same type with two spellings and two
 # origins; a taxonomy alias written either way has to read the same here.
@@ -38,13 +48,6 @@ PIPELINE_ONLY_CRAWL_ERRORS = Literal[
 #: The stable failure code beside ``classification``: a declared union of the
 #: two groups (hand-maintained, since mypy cannot compute ``*get_args()``).
 CrawlError = Classification | PIPELINE_ONLY_CRAWL_ERRORS
-
-CrawlStrategyName = Literal[
-    "HTTP_DECLARED_CRAWLER",
-    "HTTP_CFFI_IMPERSONATE",
-    "BROWSER_HEADLESS",
-    "BROWSER_HEADED_WARMED",
-]
 
 
 def literal_members(alias: object) -> frozenset[str]:

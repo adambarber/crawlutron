@@ -1,3 +1,5 @@
+"""Generated from packages/core/src/crawlutron/vocabulary/taxonomy.py; do not edit."""
+
 from __future__ import annotations
 
 from enum import StrEnum

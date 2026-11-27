@@ -1,13 +1,8 @@
+"""Generated from packages/core/src/crawlutron/vocabulary/strategies.py; do not edit."""
+
 from __future__ import annotations
 
 from enum import StrEnum
-
-from crawlutron.vocabulary.strategies import (
-    BROWSER_HEADED_WARMED,
-    BROWSER_HEADLESS,
-    HTTP_CFFI_IMPERSONATE,
-    HTTP_DECLARED_CRAWLER,
-)
 
 
 class CrawlStrategy(StrEnum):
@@ -17,7 +12,7 @@ class CrawlStrategy(StrEnum):
     a separate, orthogonal concern handled by ``CrawlExtractionMethod``.
     """
 
-    HTTP_DECLARED_CRAWLER = HTTP_DECLARED_CRAWLER
-    HTTP_CFFI_IMPERSONATE = HTTP_CFFI_IMPERSONATE
-    BROWSER_HEADLESS = BROWSER_HEADLESS
-    BROWSER_HEADED_WARMED = BROWSER_HEADED_WARMED
+    HTTP_DECLARED_CRAWLER = "HTTP_DECLARED_CRAWLER"
+    HTTP_CFFI_IMPERSONATE = "HTTP_CFFI_IMPERSONATE"
+    BROWSER_HEADLESS = "BROWSER_HEADLESS"
+    BROWSER_HEADED_WARMED = "BROWSER_HEADED_WARMED"
