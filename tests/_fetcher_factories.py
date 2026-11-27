@@ -5,6 +5,7 @@ import door for a fetch double is ``tests._fetch_doubles`` (#314, 3.3)."""
 
 from __future__ import annotations
 
+import socket
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -66,6 +67,20 @@ from tests._transport_doubles import (
 from tests._transport_doubles import (
     _void_store_cookies as _void_store_cookies,
 )
+
+
+def reserved_loopback_socket() -> socket.socket:
+    """A live TCP socket bound to port 0; the caller owns it until handoff."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    return sock
+
+
+def reserved_refusal_socket() -> socket.socket:
+    """A live UDP-bound loopback socket owning a port whose TCP dial is refused."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("127.0.0.1", 0))
+    return sock
 
 
 async def invoke_http_strategy(

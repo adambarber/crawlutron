@@ -6,6 +6,7 @@ import asyncio
 import ipaddress
 import logging
 import os
+import socket
 import sys
 from collections.abc import Mapping
 
@@ -71,7 +72,9 @@ async def relay_connection(
             scope.stop_now(handle)
 
 
-async def start(config: IngressConfig) -> tuple[asyncio.Server, int, TaskScope]:
+async def start(
+    config: IngressConfig, *, sock: socket.socket | None = None
+) -> tuple[asyncio.Server, int, TaskScope]:
     """Bind the listener; return it, its actual port, and its lifecycle scope."""
     bind_host, bind_port, _, _ = config
     scope = TaskScope.process(
@@ -89,7 +92,10 @@ async def start(config: IngressConfig) -> tuple[asyncio.Server, int, TaskScope]:
 
         handle.task.add_done_callback(_settled)
 
-    server = await asyncio.start_server(_accept, str(bind_host), bind_port)
+    if sock is None:
+        server = await asyncio.start_server(_accept, str(bind_host), bind_port)
+    else:
+        server = await asyncio.start_server(_accept, sock=sock)
     return server, int(server.sockets[0].getsockname()[1]), scope
 
 
