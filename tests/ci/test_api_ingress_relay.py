@@ -10,13 +10,7 @@ import socket
 import pytest
 
 from crawlutron_admit.task_scope import Grace
-
-
-def _free_port() -> int:
-    """Reserve an ephemeral loopback port for an isolated relay listener."""
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+from tests._fetcher_factories import reserved_loopback_socket, reserved_refusal_socket
 
 
 async def _echo_server(sink: list[bytes] | None = None) -> tuple[asyncio.Server, int]:
@@ -73,74 +67,80 @@ async def test_relay_pipes_bytes_and_half_close() -> None:
     sink: list[bytes] = []
     upstream, upstream_port = await _echo_server(sink)
     async with upstream:
-        config = parse_ingress_config(
-            {
-                "API_INGRESS_BIND_HOST": "0.0.0.0",
-                "API_INGRESS_BIND_PORT": str(_free_port()),
-                "API_INGRESS_UPSTREAM_HOST": "127.0.0.1",
-                "API_INGRESS_UPSTREAM_PORT": str(upstream_port),
-            }
-        )
-        server, port, scope = await start(config)
-        serving = scope.spawn_now(lambda: serve_forever(server, scope))
-        try:
-            reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
+        with reserved_loopback_socket() as bind_sock:
+            config = parse_ingress_config(
+                {
+                    "API_INGRESS_BIND_HOST": "0.0.0.0",
+                    "API_INGRESS_BIND_PORT": str(int(bind_sock.getsockname()[1])),
+                    "API_INGRESS_UPSTREAM_HOST": "127.0.0.1",
+                    "API_INGRESS_UPSTREAM_PORT": str(upstream_port),
+                }
+            )
+            server, port, scope = await start(config, sock=bind_sock)
+            serving = scope.spawn_now(lambda: serve_forever(server, scope))
             try:
-                writer.write(b"ping")
-                await writer.drain()
-                writer.write_eof()
-                assert await asyncio.wait_for(reader.read(4096), 5) == b"echo:ping"
+                reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
+                try:
+                    writer.write(b"ping")
+                    await writer.drain()
+                    writer.write_eof()
+                    assert await asyncio.wait_for(reader.read(4096), 5) == b"echo:ping"
+                finally:
+                    writer.close()
+                    await writer.wait_closed()
             finally:
-                writer.close()
-                await writer.wait_closed()
-        finally:
-            await scope.stop(serving, Grace(2))
-        assert not server.is_serving()
-        assert sink == [b"ping"]
-        assert scope.registry.active.value == 0
+                await scope.stop(serving, Grace(2))
+            assert not server.is_serving()
+    assert sink == [b"ping"]
+    assert scope.registry.active.value == 0
 
 
-async def test_failed_upstream_dial_closes_client_and_releases_slot(caplog: pytest.LogCaptureFixture) -> None:
+async def test_failed_upstream_dial_closes_client_and_releases_slot(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """A dead upstream closes the client socket and returns the relay's slot."""
     from scripts.api_ingress_sidecar import parse_ingress_config, serve_forever, start
 
-    config = parse_ingress_config(
-        {
-            "API_INGRESS_BIND_HOST": "0.0.0.0",
-            "API_INGRESS_BIND_PORT": str(_free_port()),
-            "API_INGRESS_UPSTREAM_HOST": "127.0.0.1",
-            "API_INGRESS_UPSTREAM_PORT": str(_free_port()),
-        }
-    )
-    server, port, scope = await start(config)
-    serving = scope.spawn_now(lambda: serve_forever(server, scope))
-    baseline = scope.registry.active.value
-    before_tasks = set(asyncio.all_tasks())
-    try:
-        reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
+    with reserved_loopback_socket() as bind_sock, reserved_refusal_socket() as upstream_guard:
+        config = parse_ingress_config(
+            {
+                "API_INGRESS_BIND_HOST": "0.0.0.0",
+                "API_INGRESS_BIND_PORT": str(int(bind_sock.getsockname()[1])),
+                "API_INGRESS_UPSTREAM_HOST": "127.0.0.1",
+                "API_INGRESS_UPSTREAM_PORT": str(int(upstream_guard.getsockname()[1])),
+            }
+        )
+        server, port, scope = await start(config, sock=bind_sock)
+        serving = scope.spawn_now(lambda: serve_forever(server, scope))
+        baseline = scope.registry.active.value
+        before_tasks = set(asyncio.all_tasks())
         try:
             with caplog.at_level(logging.WARNING, logger="scripts.api_ingress_sidecar"):
-                assert await asyncio.wait_for(reader.read(1), 5) == b"", (
-                    "client socket left open on failed dial"
-                )
-            reasons = [r.getMessage() for r in caplog.records if r.name == "scripts.api_ingress_sidecar"]
-            assert any("could not reach the fixed upstream" in reason for reason in reasons), (
-                "no fixed refusal"
-            )
-            assert all("127.0.0.1" not in reason for reason in reasons), "target echoed in refusal"
-            for _ in range(200):
-                if scope.registry.active.value == baseline:
-                    break
-                await asyncio.sleep(0.01)
-            assert scope.registry.active.value == baseline, "failed relay leaked its registry slot"
-            leaked = [task for task in asyncio.all_tasks() if task not in before_tasks and not task.done()]
-            assert leaked == [], "failed relay left a pending task"
+                reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
+                try:
+                    assert await asyncio.wait_for(reader.read(1), 5) == b"", (
+                        "client socket left open on failed dial"
+                    )
+                    reasons = [
+                        r.getMessage() for r in caplog.records if r.name == "scripts.api_ingress_sidecar"
+                    ]
+                    assert any("could not reach the fixed upstream" in reason for reason in reasons), reasons
+                    assert all("127.0.0.1" not in reason for reason in reasons), "target echoed in refusal"
+                    for _ in range(200):
+                        if scope.registry.active.value == baseline:
+                            break
+                        await asyncio.sleep(0.01)
+                    assert scope.registry.active.value == baseline, "failed relay leaked its registry slot"
+                    leaked = [
+                        task for task in asyncio.all_tasks() if task not in before_tasks and not task.done()
+                    ]
+                    assert leaked == [], "failed relay left a pending task"
+                finally:
+                    writer.close()
+                    await writer.wait_closed()
         finally:
-            writer.close()
-            await writer.wait_closed()
-    finally:
-        await scope.stop(serving, Grace(2))
-    assert not server.is_serving()
+            await scope.stop(serving, Grace(2))
+        assert not server.is_serving()
 
 
 async def test_relay_ignores_client_selected_upstream() -> None:
@@ -152,33 +152,65 @@ async def test_relay_ignores_client_selected_upstream() -> None:
     attacker_sink: list[bytes] = []
     attacker, attacker_port = await _echo_server(attacker_sink)
     async with upstream, attacker:
+        with reserved_loopback_socket() as bind_sock:
+            config = parse_ingress_config(
+                {
+                    "API_INGRESS_BIND_HOST": "0.0.0.0",
+                    "API_INGRESS_BIND_PORT": str(int(bind_sock.getsockname()[1])),
+                    "API_INGRESS_UPSTREAM_HOST": "127.0.0.1",
+                    "API_INGRESS_UPSTREAM_PORT": str(upstream_port),
+                }
+            )
+            server, port, scope = await start(config, sock=bind_sock)
+            serving = scope.spawn_now(lambda: serve_forever(server, scope))
+            hostile = (
+                f"GET http://attacker.invalid:{attacker_port}/ HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{attacker_port}\r\n"
+                "X-Forward-To: 127.0.0.1\r\n\r\n"
+            ).encode()
+            try:
+                reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
+                try:
+                    writer.write(hostile)
+                    await writer.drain()
+                    assert await asyncio.wait_for(reader.read(4096), 5) == b"echo:" + hostile
+                finally:
+                    writer.close()
+                    await writer.wait_closed()
+            finally:
+                await scope.stop(serving, Grace(2))
+            assert not server.is_serving()
+    assert sink == [hostile]
+    assert attacker_sink == []
+    assert scope.registry.active.value == 0
+
+
+def test_reserved_port_cannot_be_stolen_before_handoff() -> None:
+    """A rival bind fails while the helper still owns the reservation."""
+    with reserved_loopback_socket() as sock, socket.socket() as rival:
+        with pytest.raises(OSError):
+            rival.bind(sock.getsockname())
+
+
+async def test_relay_binds_the_callers_live_socket() -> None:
+    """The listener adopts the owned socket; no second bind races the handoff."""
+    from scripts.api_ingress_sidecar import parse_ingress_config, start
+
+    with reserved_loopback_socket() as bind_sock:
         config = parse_ingress_config(
             {
                 "API_INGRESS_BIND_HOST": "0.0.0.0",
-                "API_INGRESS_BIND_PORT": str(_free_port()),
+                "API_INGRESS_BIND_PORT": str(int(bind_sock.getsockname()[1])),
                 "API_INGRESS_UPSTREAM_HOST": "127.0.0.1",
-                "API_INGRESS_UPSTREAM_PORT": str(upstream_port),
+                "API_INGRESS_UPSTREAM_PORT": "8765",
             }
         )
-        server, port, scope = await start(config)
-        serving = scope.spawn_now(lambda: serve_forever(server, scope))
-        hostile = (
-            f"GET http://attacker.invalid:{attacker_port}/ HTTP/1.1\r\n"
-            f"Host: 127.0.0.1:{attacker_port}\r\n"
-            "X-Forward-To: 127.0.0.1\r\n\r\n"
-        ).encode()
+        server, port, scope = await start(config, sock=bind_sock)
         try:
-            reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
-            try:
-                writer.write(hostile)
-                await writer.drain()
-                assert await asyncio.wait_for(reader.read(4096), 5) == b"echo:" + hostile
-            finally:
-                writer.close()
-                await writer.wait_closed()
+            assert server.sockets[0].fileno() == bind_sock.fileno()
+            assert port == int(bind_sock.getsockname()[1])
         finally:
-            await scope.stop(serving, Grace(2))
+            server.close()
+            await server.wait_closed()
         assert not server.is_serving()
-        assert sink == [hostile]
-        assert attacker_sink == []
         assert scope.registry.active.value == 0
