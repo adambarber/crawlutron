@@ -6,21 +6,11 @@ and nothing propagates to the admit caller.
 
 from __future__ import annotations
 
-import enum
 from typing import Protocol, runtime_checkable
 
 from crawlutron_admit.values import Ratio
 
-__all__ = ["GaugeState", "ResourceGauge"]
-
-
-class GaugeState(enum.StrEnum):
-    """The explicit gauge classification (§7.2)."""
-
-    HEALTHY = "healthy"
-    UNHEALTHY = "unhealthy"
-    COLD = "cold"
-    STALE = "stale"
+__all__ = ["ResourceGauge"]
 
 
 @runtime_checkable
