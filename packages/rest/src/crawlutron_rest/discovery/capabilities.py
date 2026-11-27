@@ -88,7 +88,6 @@ def _feature_flag_fields() -> dict[str, bool]:
         "headed_browser": True,
         "pdf_extraction": True,
         "direct_http": True,
-        "trafilatura": True,
         "discovered_links": True,
         "frame_discovery": True,
         "form_discovery": True,

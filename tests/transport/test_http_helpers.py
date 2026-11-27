@@ -23,11 +23,7 @@ from crawlutron.transport.fetch_policy import (
     retry_backoff_seconds,
 )
 from crawlutron.transport.request_profile import cookie_header_for_url, headers_for_strategy
-from crawlutron.vocabulary.extraction import (
-    EXTRACTION_DOCUMENT,
-    EXTRACTION_METHOD_BINARY_NO_TEXT,
-    EXTRACTION_TRAFILATURA,
-)
+from crawlutron.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_METHOD_BINARY_NO_TEXT
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from crawlutron_extract.limits import ExtractLimits
 from tests._assertions import assert_result_failed, assert_result_success
@@ -375,13 +371,6 @@ class TestHttpStrategyResult:
             body=b"name,age\nAlice,30\nBob,25",
         )
         assert "Alice" in (result.text or "")
-
-    async def test_trafilatura_extract_html_and_non_html(self) -> None:
-        assert "hello" in ((await self._run(policy={"extraction": EXTRACTION_TRAFILATURA})).text or "")
-        non_html = await self._run(
-            policy={"extraction": EXTRACTION_TRAFILATURA}, ctype="application/json", body=b"{}"
-        )
-        assert non_html.text == "{}"
 
     async def test_discovery_diagnostics_records_exceptions_and_feeds(self) -> None:
         _failed_probe = ConnectionError("discovery failed")

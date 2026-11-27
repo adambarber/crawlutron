@@ -49,7 +49,6 @@ class TestCapabilitiesPayload:
             "headed_browser",
             "pdf_extraction",
             "direct_http",
-            "trafilatura",
             "discovered_links",
             "frame_discovery",
             "form_discovery",

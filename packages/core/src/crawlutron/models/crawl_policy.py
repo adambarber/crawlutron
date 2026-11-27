@@ -60,8 +60,8 @@ class CrawlPolicy(BaseModel):
         Field(
             description="Output/parsing pipeline applied to the content the selected fetch strategy "
             "retrieves. Orthogonal to the fetch strategy. FULL (default) runs the unified in-house "
-            "pipeline for HTML main text, documents, and plain text. TRAFILATURA selects the "
-            "HTML-only main-text path. DOCUMENT selects the document path for PDFs and other non-HTML "
+            "pipeline for HTML main text, documents, and plain text. DOCUMENT selects the document "
+            "path for PDFs and other non-HTML "
             "bodies. These are not strategies; pair any of them with any fetch strategy.",
         ),
     ] = CrawlExtractionMethod.FULL

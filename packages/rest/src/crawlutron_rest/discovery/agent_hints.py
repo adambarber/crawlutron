@@ -7,7 +7,7 @@ from crawlutron.models.agent_hints_response import AgentHintsResponse
 from crawlutron.models.crawl_strategy import CrawlStrategy
 from crawlutron.models.example_policy import ExamplePolicy
 from crawlutron.service.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
-from crawlutron.vocabulary.extraction import EXTRACTION_DESCRIPTIONS, EXTRACTION_TRAFILATURA
+from crawlutron.vocabulary.extraction import EXTRACTION_DESCRIPTIONS
 from crawlutron.vocabulary.identity import SERVICE_ID
 from crawlutron.vocabulary.limits import LARGE_CRAWL_GUIDANCE
 from crawlutron.vocabulary.strategies import CFFI_IMPERSONATE_TARGET, HTTP_DECLARED_CRAWLER
@@ -91,8 +91,8 @@ GUIDANCE = [
     "Use GET /health for lightweight process liveness and Docker healthchecks.",
     "Use GET /ready for crawl capacity/readiness; HTTP 503 means saturated backpressure, not necessarily "
     "crashed.",
-    "Long direct HTTP, document extraction, trafilatura extraction, and synchronous browser work are "
-    "offloaded from the FastAPI event loop so liveness can stay responsive during crawls.",
+    "Long direct HTTP, document extraction, and synchronous browser work are offloaded from the FastAPI "
+    "event loop so liveness can stay responsive during crawls.",
     "Prefer direct transparent crawler HTTP for sites that allow it.",
     "Use browser strategies only when direct HTTP is blocked, incomplete, or requires rendering.",
     "Do not treat HTTP 200 as content success without checking classification and quality score.",
@@ -156,15 +156,6 @@ GUIDANCE = [
 EXAMPLE_POLICIES: dict[str, ExamplePolicy] = {
     "browser_fallback": BROWSER_FALLBACK_POLICY,
     "document_extraction": DOCUMENT_EXTRACTION_POLICY,
-    "trafilatura_only": {
-        "strategies": [HTTP_DECLARED_CRAWLER],
-        "extraction": EXTRACTION_TRAFILATURA,
-        "limits": {
-            "timeout_seconds": 15,
-            "max_retries": 1,
-            "max_discovered_links": 100,
-        },
-    },
     "direct_http_only": {
         "strategies": [HTTP_DECLARED_CRAWLER],
         "limits": {

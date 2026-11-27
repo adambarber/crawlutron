@@ -97,7 +97,6 @@ Supported strategy names (fetch strategies):
 Supported extraction methods (parsing pipelines, orthogonal to fetch strategy):
 
 - `full` — Unified in-house pipeline (HTML main text, documents, plain text)
-- `trafilatura` — Forces HTML-only main-text extraction
 - `document` — Forces the in-house document path for PDFs and non-HTML bodies
 - `dom` — DOM text extraction (browser-rendered pages)
 

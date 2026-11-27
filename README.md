@@ -421,7 +421,6 @@ exhausted.
 
 - `full` (default) — unified in-house pipeline (HTML main text, documents, plain text),
   returning both `markdown` and `text`.
-- `trafilatura` — HTML-only main-text path; documents are not parsed.
 - `document` — document path for PDF/office/text bodies via `crawlutron-extract`.
 - `dom` — raw DOM / selected-element extraction (`css_selector` / `xpath`).
 

@@ -259,7 +259,7 @@ def test_flags_map_to_wire_fields(capsys):
                 "--strategy",
                 "HTTP_DECLARED_CRAWLER",
                 "--extraction",
-                "trafilatura",
+                "document",
                 "--no-robots",
                 "--deep-crawl",
                 "bfs",
@@ -270,7 +270,7 @@ def test_flags_map_to_wire_fields(capsys):
     sent = json.loads(capture[0].content or b"{}")
     policy = sent["policy"]
     assert policy["strategies"] == ["HTTP_DECLARED_CRAWLER"]
-    assert policy["extraction"] == "trafilatura"
+    assert policy["extraction"] == "document"
     limits = policy["limits"]
     assert limits["timeout_seconds"] == 10
     assert limits["max_retries"] == 3

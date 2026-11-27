@@ -16,7 +16,7 @@ from crawlutron.models.result_factory import terminal_attempt
 from crawlutron.models.serialization import to_dict
 from crawlutron.models.taxonomy import Classification
 from crawlutron.transport.scheduler import DomainScheduler
-from crawlutron.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA
+from crawlutron.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_FULL
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._browser_doubles import _fake_browser
@@ -209,17 +209,17 @@ class TestEngineChainEdges:
         assert result.status == "success"
         assert "doc table" in (result.markdown or "")
 
-    async def test_browser_strategy_trafilatura_extraction(self, base_url):
+    async def test_browser_strategy_full_extraction(self, base_url):
         result = await crawled_result(
             f"{base_url}/doc2",
             policy={
                 "strategies": [BROWSER_HEADLESS],
-                "extraction": EXTRACTION_TRAFILATURA,
+                "extraction": EXTRACTION_FULL,
                 "browser_profile": {"include_markdown": True},
             },
-            browser_worker=_fake_browser(html="<html><body>trafilatura body</body></html>"),
+            browser_worker=_fake_browser(html="<html><body>full body</body></html>"),
         )
-        assert "trafilatura body" in (result.markdown or "")
+        assert "full body" in (result.markdown or "")
 
     async def test_browser_strategy_no_content(self, base_url):
         result = await crawled_result(

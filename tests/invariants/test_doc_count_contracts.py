@@ -129,7 +129,22 @@ _ACTIVE_DOCS = (
     "docs/module-graph.md",
 )
 _BACKTICK = re.compile(r"`[^`\n]*`")
-_REMOVED_LIBS = ("markitdown", "markdownify", "trafilatura")
+_REMOVED_LIBS = ("markitdown", "markdownify")
+_DELETED_METHOD = "trafilatura"
+_LIVE_DELETED_METHOD_SOURCES = (
+    "NOTICE",
+    "packages/core/src/crawlutron/vocabulary/extraction.py",
+    "packages/core/src/crawlutron/models/crawl_extraction_method.py",
+    "packages/core/src/crawlutron/models/crawl_policy.py",
+    "packages/core/src/crawlutron/models/unified_crawl_result.py",
+    "packages/core/src/crawlutron/transport/http_classify.py",
+    "packages/rest/src/crawlutron_rest/main.py",
+    "packages/rest/src/crawlutron_rest/api/crawl_router.py",
+    "packages/rest/src/crawlutron_rest/cli/__main__.py",
+    "packages/rest/src/crawlutron_rest/discovery/agent_hints.py",
+    "packages/rest/src/crawlutron_rest/discovery/capabilities.py",
+    "packages/mcp/src/crawlutron_mcp/registry.py",
+)
 _FAIL_UNDER = re.compile(r"--cov-fail-under=(\d+)")
 _SMOKE_VERSION = re.compile(r"version\(['\"]crawlutron['\"]\)")
 
@@ -232,7 +247,7 @@ def test_active_docs_name_no_removed_extraction_library():
 
 
 def test_active_docs_gate_bites_a_reintroduced_library_claim():
-    planted = "`full` — Unified pipeline (trafilatura for HTML, markitdown for documents)."
+    planted = "`full` — Unified pipeline (markitdown for documents)."
     offenders = _stale_extraction_offenders(planted, "README.md")
     assert any("names removed extraction library" in hit for hit in offenders), offenders
 
@@ -292,3 +307,43 @@ def test_manual_plan_extraction_list_gate_bites_a_planted_value():
     plan = _read("docs/references/crawlutron-manual-test-plan.md")
     planted = plan.replace("dom]", "dom, extra]", 1)
     assert any("!= live" in hit for hit in _extraction_list_offenders(planted))
+
+
+def _deleted_text_offenders(text: str, document: str) -> list[str]:
+    return [
+        f"{document}:{number}: revived deleted extraction value {_DELETED_METHOD!r}"
+        for number, raw in enumerate(text.splitlines(), start=1)
+        if _DELETED_METHOD in raw.lower()
+    ]
+
+
+def _deleted_method_offenders() -> list[str]:
+    offenders = [
+        f"CrawlExtractionMethod: revived deleted value {method.value!r}"
+        for method in CrawlExtractionMethod
+        if _DELETED_METHOD in method.value.lower()
+    ]
+    offenders.extend(
+        f"EXTRACTION_DESCRIPTIONS[{key}]: revived deleted value"
+        for key, description in EXTRACTION_DESCRIPTIONS.items()
+        if _DELETED_METHOD in key.lower() or _DELETED_METHOD in description.lower()
+    )
+    for relative in _LIVE_DELETED_METHOD_SOURCES + _ACTIVE_DOCS:
+        offenders.extend(_deleted_text_offenders(_read(relative), relative))
+    return offenders
+
+
+def test_deleted_extraction_value_is_absent_from_live_surfaces():
+    assert not (failures := _deleted_method_offenders()), "; ".join(failures)
+
+
+def test_deleted_extraction_value_gate_bites_a_documented_value():
+    planted = "- `trafilatura` — HTML-only main-text path; documents are not parsed."
+    offenders = _deleted_text_offenders(planted, "README.md")
+    assert any("revived deleted extraction value" in hit for hit in offenders), offenders
+
+
+def test_deleted_extraction_value_gate_bites_a_source_value():
+    planted = 'EXTRACTION_TRAFILATURA: str = "trafilatura"'
+    offenders = _deleted_text_offenders(planted, "packages/core/src/crawlutron/vocabulary/extraction.py")
+    assert any("revived deleted extraction value" in hit for hit in offenders), offenders

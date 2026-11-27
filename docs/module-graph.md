@@ -1539,6 +1539,7 @@ graph LR
     api_watch_router --> api_route_layer
     api_watch_router --> fastapi
     api_watch_router --> host_policy
+    cli___main__ --> models_crawl_extraction_method
     cli___main__ --> httpx
     cli_client --> httpx
     discovery_agent_hints --> models_agent_hints_payload

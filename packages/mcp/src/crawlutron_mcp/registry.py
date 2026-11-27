@@ -158,7 +158,7 @@ TOOL_SPECS: list[ToolSpec] = [
             "Execute a policy-driven crawl of one or more public HTTP(S) URLs. Accepts the same "
             "policy shape as POST /v1/crawl: strategies (ordered fallback chain of "
             "HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS, BROWSER_HEADED_WARMED), "
-            "extraction (full, trafilatura, document, dom), limits (timeout_seconds, max_retries, "
+            "extraction (full, document, dom), limits (timeout_seconds, max_retries, "
             "challenge_wait_seconds, max_discovered_links, respect_robots), discovery, scope_regex, "
             "css_selector, xpath, request_profile, browser_profile, headers, credentials "
             "(origin-scoped authorization). Webhook/async delivery is not "

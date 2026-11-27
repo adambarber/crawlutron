@@ -105,8 +105,6 @@ def _configure_logging(settings: CrawlerSettings) -> logging.Logger:
         log_file_max_bytes=settings.log_file_max_bytes,
         log_file_backup_count=settings.log_file_backup_count,
     )
-    # Third-party extraction WARNINGs are parser noise; keep ERROR+ visible.
-    logging.getLogger("trafilatura").setLevel(logging.ERROR)
     return logger
 
 
@@ -143,8 +141,7 @@ def _build_app(
             "Localhost-only policy-driven crawler execution service for automated script callers. "
             "GET /health is lightweight liveness for Docker healthchecks; GET /ready reports active crawl "
             "saturation without implying process death. "
-            "Blocking direct HTTP, document extraction, Trafilatura, "
-            "and synchronous browser work run off the FastAPI "
+            "Blocking direct HTTP, document extraction, and synchronous browser work run off the FastAPI "
             "event loop so liveness stays responsive during crawls. "
             "Clients submit resolved crawl policies, inspect per-URL provenance, and use attempt history "
             "to make reviewable policy suggestions rather than mutating host policy automatically. "
