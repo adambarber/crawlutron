@@ -14,8 +14,9 @@ FastAPI. It exposes a single, machine-readable crawl contract that supports:
   impersonation (curl_cffi).
 - **Browser rendering** — headless/headed Firefox via [Camoufox](https://github.com/daijro/camoufox)
   for JavaScript-dependent pages.
-- **Document extraction** — PDF/DOCX/PPTX/XLSX/TXT via markitdown, plus main-text
-  extraction via trafilatura.
+- **Document extraction** — bounded, deterministic parsing via the in-house
+  `crawlutron-extract` engine for PDF, office documents, and text formats (PDF text
+  via pdfminer.six), plus HTML main-text extraction.
 - **Content classification** — a normalized classification enum (examples: `rendered`,
   `not_modified`, `captcha_detected`, `waf_challenge_detected`, `robots_disallowed`,
   `network_error`); `GET /v1/capabilities` serves the authoritative value set under
@@ -418,9 +419,10 @@ exhausted.
 
 ### Extraction methods (`policy.extraction`)
 
-- `full` (default) — best-effort main-text extraction, returns both `markdown` and `text`.
-- `trafilatura` — main-text only via trafilatura.
-- `document` — markitdown-based extraction for PDF/DOCX/PPTX/XLSX/TXT (binary documents).
+- `full` (default) — unified in-house pipeline (HTML main text, documents, plain text),
+  returning both `markdown` and `text`.
+- `trafilatura` — HTML-only main-text path; documents are not parsed.
+- `document` — document path for PDF/office/text bodies via `crawlutron-extract`.
 - `dom` — raw DOM / selected-element extraction (`css_selector` / `xpath`).
 
 ---
@@ -586,7 +588,7 @@ with `422`.
 │   │       ├── cli/          # crawler CLI entry points
 │   │       ├── config/       # env.py + settings.py (CRAWLUTRON_* environment surface)
 │   │       ├── discovery/    # /v1/capabilities, /v1/agent-hints, /.well-known
-│   │       ├── extraction/   # documents.py (trafilatura + selector extraction)
+│   │       ├── extraction/   # bounded shaping over crawlutron-extract (packages/extract)
 │   │       ├── health/       # /health, /ready (READINESS_STATE singleton)
 │   │       ├── mcp/          # MCP protocol support shared with crawlutron_mcp
 │   │       ├── models/       # Pydantic/dataclass wire + domain models

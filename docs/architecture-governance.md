@@ -50,13 +50,13 @@ the slowest gate, not the sum; each child is hard-killed after 60 s
 - `mypy` — `mypy.ini`'s `files` is the scope (hook: `mypy`).
 - `vulture` dead code, min-confidence 90, zero tolerance, no ignore-names/excludes/whitelist (hook: `vulture`).
 - `commit-citation` (commit-msg) — every commit message cites an issue (hook: `commit-citation`).
-- `coverage` (pre-push) — measured-descriptive surface only (**no threshold, no fail-under, no ratchet** until the owner rules one) (hook: `coverage`).
+- `coverage` (pre-push) — enforces the 90% overall floor (`--cov-fail-under=90`) plus per-package floors from `coverage-floors.json`; the codecov badge is informational (hook: `coverage`).
 - `battery` — the full randomized test suite as commit admission control; exactly ONE pytest child runs at pre-commit and it covers the whole collected suite (hook: `battery`).
 
-## Coverage: an explicit stated refusal
+## Coverage: enforced at pre-push
 
-No coverage badge or coverage ratchet is claimed. The pre-push `coverage`
-hook is measured-descriptive only — no threshold, no fail-under, no ratchet
-until the owner rules one (hook: `coverage`). Coverage is a
-measurement, not a safety boundary; the safety boundary is the invariant
-suite and the fail-closed SSRF/auth guards.
+The codecov badge is informational. The pre-push `coverage` and
+`coverage-floor` hooks enforce a 90% overall floor and per-package floors
+seeded from `coverage-floors.json`, which ratchet up only. Coverage is a
+gate, not the safety boundary; the boundary stays the invariant suite and
+the fail-closed SSRF/auth guards.

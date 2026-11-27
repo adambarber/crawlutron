@@ -14,7 +14,7 @@ class CrawlExtractionMethod(StrEnum):
     """Output/parsing pipeline applied to fetched content, orthogonal to fetch strategy.
 
     ``FULL`` is the unified default (HTML main text, documents, plain text);
-    ``TRAFILATURA`` forces HTML main-text only; ``DOCUMENT`` forces markitdown for non-HTML.
+    ``TRAFILATURA`` selects HTML-only main text; ``DOCUMENT`` selects the document path.
     """
 
     FULL = EXTRACTION_FULL

@@ -16,14 +16,11 @@ EXTRACTION_DOM: str = "dom"
 
 # Human-readable descriptions for discovery/agent-hints.
 EXTRACTION_DESCRIPTIONS: dict[str, str] = {
-    EXTRACTION_FULL: "Unified output pipeline: trafilatura HTML main text, "
-    "markitdown for documents, plain-text passthrough.",
-    EXTRACTION_TRAFILATURA: "HTML-only main-text extraction for noisy HTML; "
-    "does not parse PDF or binary documents.",
-    EXTRACTION_DOCUMENT: "Document/body extraction via markitdown for PDFs and "
-    "non-HTML responses when text evidence is needed.",
-    EXTRACTION_DOM: "DOM-text extraction: rendered or parsed page text passthrough "
-    "without the document or Trafilatura pipelines.",
+    EXTRACTION_FULL: "Unified in-house pipeline for HTML main text, documents, and plain text.",
+    EXTRACTION_TRAFILATURA: "HTML-only main-text path for noisy HTML; PDF and binary "
+    "documents are not parsed.",
+    EXTRACTION_DOCUMENT: "Document/body path for PDFs and non-HTML responses via the in-house extractor.",
+    EXTRACTION_DOM: "DOM-text passthrough without the document or main-text paths.",
 }
 
 # extraction_method result codes (diagnostic/provenance labels in crawl results)

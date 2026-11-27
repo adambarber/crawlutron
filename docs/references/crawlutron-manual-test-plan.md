@@ -158,10 +158,10 @@ Response: `UnifiedCrawlResponse` with `results[]` of `UnifiedCrawlResult`:
 ### 6.2 Extraction coverage
 | TC | `extraction` | Expectation |
 |---|---|---|
-| TC-EXTR-FULL-01 | `full` (default) | Trafilatura main text + markitdown for docs + plain-text passthrough. |
+| TC-EXTR-FULL-01 | `full` (default) | In-house main text + document path + plain-text passthrough. |
 | TC-EXTR-TRAF-01 | `trafilatura` | HTML-only main text; non-HTML bodies not document-parsed. |
-| TC-EXTR-DOC-01 | `document` | PDF/non-HTML parsed via markitdown when text evidence needed. |
-| TC-EXTR-DOM-01 | `dom` | DOM-text passthrough (no Trafilatura/markitdown). |
+| TC-EXTR-DOC-01 | `document` | PDF/non-HTML parsed by the in-house extractor when text evidence needed. |
+| TC-EXTR-DOM-01 | `dom` | DOM-text passthrough (no main-text or document path). |
 
 ### 6.3 Policy `limits` coverage
 | TC | Field | Expectation |
@@ -209,7 +209,7 @@ Response: `UnifiedCrawlResponse` with `results[]` of `UnifiedCrawlResult`:
 | TC | Field | Expectation |
 |---|---|---|
 | TC-SCOPE-01 | `scope_regex` | Discovered links not matching regex are dropped. |
-| TC-CSS-01 | `css_selector` | Extraction targets matched DOM subtree → Markdown; full-page Trafilatura/markdownify bypassed. |
+| TC-CSS-01 | `css_selector` | Extraction targets matched DOM subtree → Markdown; full-page main-text/document paths bypassed. |
 | TC-XPATH-01 | `xpath` | Extraction targets matched nodes (lxml) → Markdown. |
 
 ### 6.8 Batch & webhook
