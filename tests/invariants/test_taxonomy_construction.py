@@ -110,7 +110,9 @@ def test_no_second_declaration_of_a_taxonomy_survives():
                 continue
             for lineno, values in _declared_value_sets(canonical_tree(path)):
                 for name, source in sources.items():
-                    if values == source:
+                    # A near-copy (one extra or one renamed member) is still a
+                    # hand-maintained taxonomy; exact equality would let it hide.
+                    if len(values & source) >= max(3, (3 * len(source) + 3) // 4):
                         offenders.append(f"{relative}:{lineno}: second {name} declaration")
     assert not offenders, "a taxonomy is declared outside its source and generated projections: " + ", ".join(
         sorted(set(offenders))

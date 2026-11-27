@@ -8,7 +8,7 @@ from enum import StrEnum
 class CrawlStatus(StrEnum):
     """How one fetch ended.
 
-    Orthogonal to the taxonomy's Classification, which records whether a host
+    Orthogonal to the taxonomy's ``Classification``, which records whether a host
     was reachable rather than what happened to the bytes.
     """
 

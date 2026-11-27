@@ -19,7 +19,7 @@ _SDK_PATH = "packages/sdk/src/crawlutron_sdk/generated_taxonomies.py"
 
 _STATUS_DOC = (
     '"""How one fetch ended.\n\n'
-    "    Orthogonal to the taxonomy's Classification, which records whether a host\n"
+    "    Orthogonal to the taxonomy's ``Classification``, which records whether a host\n"
     "    was reachable rather than what happened to the bytes.\n"
     '    """'
 )
