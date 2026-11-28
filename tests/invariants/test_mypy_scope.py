@@ -207,3 +207,12 @@ def test_pyright_include_terms_are_a_subset_of_the_derived_import_roots() -> Non
     assert included <= set(import_roots()), "pyrightconfig.json include names non-derived roots: " + repr(
         sorted(included - set(import_roots()))
     )
+
+
+def test_exhaustiveness_stays_compile_enforced() -> None:
+    """A closed taxonomy needs warn_unreachable: a missing arm must redden mypy."""
+    parser = configparser.ConfigParser()
+    parser.read(_MYPY_INI)
+    assert parser["mypy"].getboolean("warn_unreachable") is True, (
+        "mypy.ini warn_unreachable must stay True: a closed dispatch that forgot a member would silently pass"
+    )

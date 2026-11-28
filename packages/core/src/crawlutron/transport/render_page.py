@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
 
@@ -13,7 +13,7 @@ class GuardContext(Protocol):
 
     def route_web_socket(self, pattern: str, handler: Callable[..., object]) -> object: ...
 
-    async def cookies(self, urls: str | list[str] | None = None) -> list[dict[str, str]]: ...
+    async def cookies(self, urls: str | list[str] | None = None) -> Sequence[Mapping[str, object]]: ...
 
 
 class PageElement(Protocol):

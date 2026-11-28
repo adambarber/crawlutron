@@ -121,7 +121,7 @@ class TestHttpStrategy:
     async def test_discovery_fetch_omits_page_conditional_headers(self):
         # If-None-Match / If-Modified-Since belong to the HTML page request. Forwarding them to
         # robots.txt/sitemap fetches invites false 304s -- discovery fetches get base headers only.
-        recorded: list[tuple[str, dict[str, str]]] = []
+        recorded: list[tuple[NormalizedUrl, dict[str, str]]] = []
 
         def respond(url, headers):
             recorded.append((url, headers))
@@ -138,9 +138,7 @@ class TestHttpStrategy:
             cache=cache,
             content_cache=None,
         )
-        robot_calls = [
-            h for u, h in recorded if isinstance(u, NormalizedUrl) and u.raw.endswith("/robots.txt")
-        ]
+        robot_calls = [h for u, h in recorded if u.raw.endswith("/robots.txt")]
         assert robot_calls, "discovery never fetched robots.txt"
         for headers in robot_calls:
             lower = {k.lower() for k in headers}

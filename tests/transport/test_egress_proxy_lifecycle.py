@@ -39,7 +39,8 @@ async def test_process_reset_closes_a_live_listener() -> None:
     server = await serve_proxy(policy=UNRESTRICTED_HOST_POLICY)
     assert server.is_live
     process_state.reset_all_process_state()
-    assert not server.is_live
+    now_live = bool(server.is_live)
+    assert not now_live
     assert not process_state.owner_has_state(_OWNER)
 
 

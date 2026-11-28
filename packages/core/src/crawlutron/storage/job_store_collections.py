@@ -116,8 +116,6 @@ def read_transient_retries(retries: dict[str, int], *, host_policy: HostPolicy) 
     """The retry column's text keys re-admitted against the live policy."""
     admitted_retries: dict[NormalizedUrl, int] = {}
     for url, attempts in retries.items():
-        if not isinstance(url, str):
-            continue
         try:
             key = _admit_cached(url, host_policy)
             if key is not None:

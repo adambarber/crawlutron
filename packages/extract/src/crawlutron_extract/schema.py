@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import assert_never
 
 from crawlutron_extract.css_select import (
     SelectorError,
@@ -126,7 +127,7 @@ def _extract_field_value(
         return _coerce_number(node.get_text())
     elif field.kind == FieldKind.INTEGER:
         return _coerce_integer(node.get_text())
-    return None
+    assert_never(field.kind)
 
 
 def extract_records(

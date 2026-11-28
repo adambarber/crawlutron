@@ -140,7 +140,8 @@ def test_a_forgotten_shared_store_is_closed_by_the_registry_reset(tmp_path):
     assert forgotten.shared is True
     assert len(live_ledgered_sites()) > before
     process_state.reset_all_process_state()
-    assert forgotten.shared is False
+    still_shared = bool(forgotten.shared)
+    assert still_shared is False
     assert len(live_ledgered_sites()) == before
 
 

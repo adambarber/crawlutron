@@ -17,8 +17,6 @@ def test_nested_quantifiers_compile_and_match_bounded():
     for evil in ["(a+)+$", "(a|a)+$", "(a*)*", "(?:a+)+b", "(a+)+c"]:
         pat = compile_scope_pattern(evil)
         assert pat is not None, evil
-        if pat is None:
-            continue
         host = "http://" + "a" * 64 + ".test/"
         with contextlib.suppress(RegexTimeout):
             match_bounded(pat, host, timeout=0.25)  # bounded: the budget fired instead of the match hanging

@@ -9,11 +9,12 @@ import asyncio
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from typing import TypedDict
 
-from crawlutron.admission.admission_links import LinkCandidate
 from crawlutron.delta import DeltaContext, delta_summary_for, removed_entry_keys
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_status import CrawlStatus
+from crawlutron.models.discovered_link import DiscoveredLink
 from crawlutron.models.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.models.unified_crawl_result import UnifiedCrawlResult
@@ -28,27 +29,28 @@ from safe_url.normalized_url import NormalizedUrl, admit_or_none
 _logger = logging.getLogger(__name__)
 
 
+class _WireLink(TypedDict):
+    """The wire form of a discovered link: its normalized field is admitted."""
+
+    normalized_url: str
+
+
 def frontier_link_url(
-    link: LinkCandidate,
+    link: DiscoveredLink | _WireLink,
     *,
     policy: HostPolicy,
     resolve_against: NormalizedUrl | None = None,
 ) -> NormalizedUrl | None:
     """The only link field eligible for frontier/visited use: the validated URL.
-    A raw href (/rel, #frag, scheme-relative) is not an absolute URL, so a link
-    with no usable normalized_url yields None -- never a raw-href fallback.
+    Both admitted forms carry a normalized_url, so no nil check belongs here;
+    this door only applies the caller's host policy -- never a raw-href fallback.
     """
-    if isinstance(link, dict):
-        normalized = link.get("normalized_url")
-    else:
-        normalized = getattr(link, "normalized_url", None)
-    if isinstance(normalized, NormalizedUrl):
-        return normalized
-    if not isinstance(normalized, str) or not normalized:
-        return None
+    if isinstance(link, DiscoveredLink):
+        return link.normalized_url
+    raw = link["normalized_url"]
     if resolve_against is None:
-        return admit_or_none(normalized, policy=policy)
-    return resolve_against.resolve(normalized)
+        return admit_or_none(raw, policy=policy)
+    return resolve_against.resolve(raw)
 
 
 @dataclass(frozen=True, slots=True)

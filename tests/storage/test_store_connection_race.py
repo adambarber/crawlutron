@@ -6,6 +6,7 @@ A first ``PRAGMA journal_mode=WAL`` conversion is a write SQLite refuses with
 
 import sqlite3
 import threading
+from collections.abc import Callable
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import cast
@@ -108,7 +109,7 @@ def test_setup_refuses_a_peer_that_never_releases(monkeypatch) -> None:
         def __init__(self) -> None:
             self.timeouts: list[int] = []
             self.attempts = 0
-            self.progress_handler = None
+            self.progress_handler: Callable[[], int] | None = None
 
         def set_progress_handler(self, handler, n: int) -> None:
             self.progress_handler = handler
@@ -146,7 +147,7 @@ def test_stalled_wal_conversion_refused_within_budget(monkeypatch) -> None:
 
         def __init__(self) -> None:
             self.timeouts: list[int] = []
-            self.progress_handler = None
+            self.progress_handler: Callable[[], int] | None = None
 
         def set_progress_handler(self, handler, n: int) -> None:
             self.progress_handler = handler
