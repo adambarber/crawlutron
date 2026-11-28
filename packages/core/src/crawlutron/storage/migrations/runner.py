@@ -11,13 +11,12 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from getpass import getuser
 from pathlib import Path
-from typing import cast
 
 from yoyo import get_backend, read_migrations
 from yoyo import step as migration_step
 from yoyo.backends import DatabaseBackend, SQLiteBackend
 from yoyo.connections import DatabaseURI
-from yoyo.migrations import Migration, MigrationList, default_migration_table
+from yoyo.migrations import MigrationList, default_migration_table
 
 from crawlutron.storage.migrations.manifest import (
     CURRENT_SCHEMAS,
@@ -176,10 +175,8 @@ def stamp_store(db_path: str | Path, schema: StoreSchema | str) -> str:
             to_mark = [migration for migration in pending if migration.id == initial_id]
         if to_mark:
             backend.mark_migrations(to_mark)
-        # to_mark[-1] is a yoyo Migration whose __getitem__ carries no return type;
-        # the cast re-declares the element so basedpyright can resolve ``.id``.
-        last = cast(list[Migration], to_mark)[-1]
-        return last.id if to_mark else "none"
+            return list(to_mark)[-1].id
+        return "none"
 
 
 def rollback_store(db_path: str | Path, schema: StoreSchema | str) -> None:

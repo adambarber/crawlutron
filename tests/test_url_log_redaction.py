@@ -62,6 +62,16 @@ def test_a_clean_url_survives_unchanged():
     assert redact_url("https://example.com/hook") == "https://example.com/hook"
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["authorization", "jwt", "code", "hmac", "credentials"],
+    ids=str,
+)
+def test_secret_name_covers_the_extended_vocabulary(name):
+    """The secret-name vocabulary covers authorization/jwt/code/hmac/credentials (#1533)."""
+    assert is_secret_name(name) is True
+
+
 BYPASS_SHAPES = [
     "https://example.com/hook?ke%79=secret",
     "https://example.com/hook?key%20=secret",
@@ -155,6 +165,21 @@ def test_watchstate_serializes_and_reprs_the_webhook_redacted():
     assert "secret" not in repr(watch)
     assert "secret" not in str(watch.model_dump())
     assert watch.delivery_url() == "https://example.com/hook?key=secret"
+
+
+def test_watchstate_repr_redacts_the_watch_url():
+    """The repr redacts secrets in the watch url itself, not just the webhook (#1530)."""
+    from crawlutron.models.watch_state import WatchState
+
+    watch = WatchState(
+        watch_id="w1",
+        url="https://example.com/watch?key=s3cr3t-v@lue",
+        interval_seconds=60,
+        next_check_at=1.0,
+        created_at=0.0,
+        updated_at=0.0,
+    )
+    assert "s3cr3t-v@lue" not in repr(watch)
 
 
 async def test_webhook_log_paths_never_emit_a_secret(caplog, monkeypatch):

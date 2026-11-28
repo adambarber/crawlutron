@@ -86,6 +86,7 @@ class WatchState(BaseModel):
     def __repr__(self) -> str:
         shown = self.redacted_webhook_url()
         fields = ", ".join(
-            f"{name}={shown if name == 'webhook_url' else value!r}" for name, value in self.__dict__.items()
+            f"{name}={self.redacted_url() if name == 'url' else shown if name == 'webhook_url' else value!r}"
+            for name, value in self.__dict__.items()
         )
         return f"WatchState({fields})"

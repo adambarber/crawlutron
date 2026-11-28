@@ -35,7 +35,20 @@ _SECRET_QUERY_KEYS = frozenset(
 
 #: Substring vocabulary: a decoded parameter name containing any of these
 #: (case-insensitive) carries a secret by name.
-_SECRET_NAME_SUBSTRINGS = ("secret", "token", "password", "passwd", "pwd", "apikey", "api_key")
+_SECRET_NAME_SUBSTRINGS = (
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "pwd",
+    "apikey",
+    "api_key",
+    "authorization",
+    "jwt",
+    "code",
+    "hmac",
+    "credentials",
+)
 
 _REDACTED = "[REDACTED]"
 

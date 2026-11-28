@@ -1,6 +1,7 @@
 """Capabilities, agent-hints and well-known discovery payload contracts."""
 
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.capabilities_response import CapabilitiesResponse
 from crawlutron.models.crawl_strategy import CrawlStrategy
 from crawlutron_rest.discovery.agent_hints import (
     EXAMPLE_POLICIES,
@@ -29,6 +30,16 @@ class TestCapabilitiesPayload:
         payload = capabilities_payload(settings)
         assert len(payload["supported_strategies"]) > 0
         assert "HTTP_DECLARED_CRAWLER" in payload["supported_strategies"]
+
+    def test_capabilities_response_admits_fractional_limit(self):
+        """A fractional default limit (rps=0.5) builds the payload and survives
+        response construction (#1527): both sides are ``dict[str, int | float]``.
+        """
+        settings = CrawlerSettings.from_mapping()
+        payload = capabilities_payload(settings)
+        payload["default_limits"]["rps"] = 0.5
+        response = CapabilitiesResponse(**payload)
+        assert response.default_limits["rps"] == 0.5
 
     def test_capabilities_advertises_time_budget_and_async(self):
         settings = CrawlerSettings.from_mapping()
