@@ -147,7 +147,7 @@ def extract_records(
     if isinstance(html, bytes):
         html = html.decode("utf-8", errors="replace")
 
-    dom, dom_truncated = build_dom(html, limits.max_dom_nodes, limits.max_dom_depth)
+    dom, _ = build_dom(html, limits.max_dom_nodes, limits.max_dom_depth)
     if dom is None:
         return Extraction(
             quality=Quality.FAILED,

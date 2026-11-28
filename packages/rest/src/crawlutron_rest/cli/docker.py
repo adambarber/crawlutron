@@ -13,7 +13,7 @@ import sys
 import time
 from collections.abc import Callable
 
-__all__ = ["run_up", "DockerUnavailable", "ImageMissing", "DockerStartError"]
+__all__ = ["run_up", "ImageMissing", "DockerStartError"]
 
 DEFAULT_IMAGE = "crawlutron/crawlutron"
 DEFAULT_BASE_URL = "http://127.0.0.1:8765"
@@ -23,10 +23,6 @@ DEFAULT_POLL_INTERVAL = 1.0
 EXIT_SUCCESS = 0
 EXIT_USAGE = 2
 EXIT_SERVER_OR_TRANSPORT = 3
-
-
-class DockerUnavailable(Exception):
-    """The docker CLI is not on PATH."""
 
 
 class ImageMissing(Exception):
