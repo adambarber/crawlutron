@@ -336,6 +336,17 @@ def test_explicit_legacy_stamp_reports_only_the_marked_migration(tmp_path, capsy
     assert "0002_crawl_jobs_drop_canonicalized" not in output
 
 
+def test_stamp_store_with_nothing_to_mark_returns_none(tmp_path):
+    """Stamping a fully current store marks nothing and reports "none".
+
+    An empty ``to_mark`` must not raise IndexError on ``to_mark[-1]`` (#1525).
+    """
+    db_path = tmp_path / "current.db"
+    store = job_store(db_path)
+    store.close()
+    assert stamp_store(db_path, StoreSchema.CRAWL_JOBS) == "none"
+
+
 @pytest.mark.parametrize(
     "changed_column",
     [
