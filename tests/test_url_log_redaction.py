@@ -62,6 +62,16 @@ def test_a_clean_url_survives_unchanged():
     assert redact_url("https://example.com/hook") == "https://example.com/hook"
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["authorization", "jwt", "code", "hmac", "credentials"],
+    ids=str,
+)
+def test_secret_name_covers_the_extended_vocabulary(name):
+    """The secret-name vocabulary covers authorization/jwt/code/hmac/credentials (#1533)."""
+    assert is_secret_name(name) is True
+
+
 BYPASS_SHAPES = [
     "https://example.com/hook?ke%79=secret",
     "https://example.com/hook?key%20=secret",
