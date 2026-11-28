@@ -157,6 +157,21 @@ def test_watchstate_serializes_and_reprs_the_webhook_redacted():
     assert watch.delivery_url() == "https://example.com/hook?key=secret"
 
 
+def test_watchstate_repr_redacts_the_watch_url():
+    """The repr redacts secrets in the watch url itself, not just the webhook (#1530)."""
+    from crawlutron.models.watch_state import WatchState
+
+    watch = WatchState(
+        watch_id="w1",
+        url="https://example.com/watch?key=s3cr3t-v@lue",
+        interval_seconds=60,
+        next_check_at=1.0,
+        created_at=0.0,
+        updated_at=0.0,
+    )
+    assert "s3cr3t-v@lue" not in repr(watch)
+
+
 async def test_webhook_log_paths_never_emit_a_secret(caplog, monkeypatch):
     from crawlutron.service import webhooks
 
