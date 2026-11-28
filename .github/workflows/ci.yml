@@ -155,6 +155,10 @@ jobs:
           fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
+      # The mypy hook shares its runner with the battery child; warming the
+      # incremental cache keeps the 60s gate wall from measuring contention.
+      - name: Pre-warm mypy cache
+        run: .venv/bin/python -m mypy
       - name: mypy
         run: .venv/bin/pre-commit run mypy --all-files
 
