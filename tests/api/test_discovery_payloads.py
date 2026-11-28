@@ -33,7 +33,7 @@ class TestCapabilitiesPayload:
 
     def test_capabilities_response_admits_fractional_limit(self):
         """A fractional default limit (rps=0.5) builds the payload and survives
-        response construction (#1527): int|float on the payload, int on the response.
+        response construction (#1527): both sides are ``dict[str, int | float]``.
         """
         settings = CrawlerSettings.from_mapping()
         payload = capabilities_payload(settings)
