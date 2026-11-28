@@ -48,7 +48,7 @@ class CapabilitiesResponse(BaseModel):
     supported_extractions: list[CrawlExtractionMethod]
     supported_classifications: list[CrawlClassification]
     output_fields: list[str]
-    default_limits: dict[str, int]
+    default_limits: dict[str, int | float]
     features: dict[str, bool]
     auth: dict[str, str]
     crawl_timing: CrawlTiming
