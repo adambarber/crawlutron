@@ -35,6 +35,11 @@ _DRAWING_TEXT_RE = re.compile(r"<a:t[^>]*>([^<]*)</a:t>")
 _SST_TEXT_RE = re.compile(r"<t[^>]*>([^<]*)</t>")
 _SI_TEXT_RE = re.compile(r"<si[^>]*>(.*?)</si>", re.DOTALL)
 
+#: SpreadsheetML cells: the t attribute decides what <v> means.
+_CELL_RE = re.compile(r"<c\b([^>]*)>(.*?)</c>", re.DOTALL)
+_CELL_TYPE_RE = re.compile(r'\bt="([^"]*)"')
+_CELL_TEXT_RE = re.compile(r"<t[^>]*>([^<]*)</t>")
+
 #: XHTML text extraction (for EPUB).
 _XHTML_TEXT_RE = re.compile(r">([^<]*)<")
 
@@ -229,6 +234,23 @@ def _pptx_read(zf: zipfile.ZipFile, flags: list[str], limits: ExtractLimits, bud
     return "\n".join(text_parts)
 
 
+def _cell_values(body: str, cell_type: str, shared_strings: list[str]) -> list[str]:
+    """One cell's text; only t="s" resolves <v> against the shared table."""
+    raw_values = re.findall(r"<v>([^<]*)</v>", body)
+    if cell_type != "s":
+        inline = _CELL_TEXT_RE.findall(body)
+        return inline if inline else raw_values
+    values: list[str] = []
+    for raw in raw_values:
+        try:
+            index = int(raw)
+        except ValueError:
+            values.append(raw)
+            continue
+        values.append(shared_strings[index] if 0 <= index < len(shared_strings) else raw)
+    return values
+
+
 def _xlsx_read(zf: zipfile.ZipFile, flags: list[str], limits: ExtractLimits, budget: dict[str, int]):
     """Extract text from every worksheet, using shared strings for cached values."""
     text_parts: list[str] = []
@@ -250,20 +272,11 @@ def _xlsx_read(zf: zipfile.ZipFile, flags: list[str], limits: ExtractLimits, bud
             if not _check_no_dtd_or_entities(sheet_xml, flags):
                 return None
             sheet_text = sheet_xml.decode("utf-8", errors="replace")
-            # Extract all cell values: <v> for shared-string refs or inline,
-            # <t> for inline strings.
             cell_values: list[str] = []
-            for val in re.findall(r"<v>([^<]*)</v>", sheet_text):
-                try:
-                    idx = int(val)
-                    if 0 <= idx < len(shared_strings):
-                        cell_values.append(shared_strings[idx])
-                    else:
-                        cell_values.append(val)
-                except ValueError:
-                    cell_values.append(val)
-            for t in re.findall(r"<t[^>]*>([^<]*)</t>", sheet_text):
-                cell_values.append(t)
+            for attrs, body in _CELL_RE.findall(sheet_text):
+                match = _CELL_TYPE_RE.search(attrs)
+                cell_type = match.group(1) if match else ""
+                cell_values.extend(_cell_values(body, cell_type, shared_strings))
             if cell_values:
                 text_parts.append(" ".join(cell_values))
     return " ".join(text_parts)

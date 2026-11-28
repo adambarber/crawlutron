@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import scripts.check_packaging as check_packaging
 from tests.chokepoint_paths import REPO_ROOT
 
 METADATA = "Metadata-Version: 2.1\nName: {name}\nVersion: 0.1\n"
@@ -90,3 +91,20 @@ def test_a_wheel_without_code_or_scripts_stays_a_meta_package(gate_tree: Path) -
     result = _run_gate(gate_tree)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "meta-package" in result.stdout
+
+
+def test_a_stale_probe_directory_is_rebuilt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cached directory without a venv config is rebuilt, never trusted."""
+    dist = tmp_path / "dist"
+    _write_wheel(dist, "stale_probe", "", {})
+    wheel = dist / "stale_probe-0.1-py3-none-any.whl"
+    probe = tmp_path / "probes" / wheel.stem
+    (probe / "bin").mkdir(parents=True)
+    (probe / "bin" / "python").write_text("not a virtual environment\n")
+    monkeypatch.setattr(check_packaging, "PROBE_ROOT", tmp_path / "probes")
+    monkeypatch.setattr(check_packaging, "REPO_ROOT", tmp_path)
+
+    rebuilt = check_packaging._probe_environment(wheel)
+
+    assert (rebuilt / "pyvenv.cfg").exists()
+    assert (rebuilt / "bin" / "python").is_symlink()

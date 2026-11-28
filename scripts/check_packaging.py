@@ -18,15 +18,28 @@ import zipfile
 from utils.paths import REPO_ROOT
 
 PROBE_ROOT = pathlib.Path(tempfile.gettempdir()) / "crawlutron-probes"
+PROBE_PYTHON = "3.12"
 UV = shutil.which("uv") or "uv"
+
+
+def _valid_probe(probe: pathlib.Path) -> bool:
+    """A cached probe is valid only as a real venv of the pinned Python."""
+    config = probe / "pyvenv.cfg"
+    if not config.exists() or not (probe / "bin" / "python").exists():
+        return False
+    with config.open() as handle:
+        versions = [line.split("=", 1)[1].strip() for line in handle if line.startswith("version_info = ")]
+    return bool(versions) and versions[0].startswith(PROBE_PYTHON)
 
 
 def _probe_environment(wheel: pathlib.Path) -> pathlib.Path:
     """A clean 3.12 environment holding exactly this wheel."""
     probe = PROBE_ROOT / wheel.stem
-    if not (probe / "bin" / "python").exists():
+    if not _valid_probe(probe):
+        if probe.exists():
+            shutil.rmtree(probe)
         subprocess.run(
-            [UV, "venv", "--python", "3.12", str(probe)],
+            [UV, "venv", "--python", PROBE_PYTHON, str(probe)],
             check=True,
             capture_output=True,
         )

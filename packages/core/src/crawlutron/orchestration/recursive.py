@@ -195,6 +195,9 @@ async def _resource_admitted_batch(
         await stack.aclose()
         admit_http = admit_browser = 0
         await metrics.record_throttle()
+    except BaseException:
+        await stack.aclose()
+        raise
     selected = http_items[:admit_http] + browser_items[:admit_browser]
     excess = http_items[admit_http:] + browser_items[admit_browser:]
     for item in reversed(excess):
