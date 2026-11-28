@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 class KeyRotateRequest(BaseModel):
-    """The new ``ck_<id>.<body>`` secret; shape is validated by the store."""
+    """The new ``ck_<id>.<body>`` secret: typed SecretStr, repr-hidden,
+    bounded to 512 characters and refused when empty."""
 
     model_config = ConfigDict(extra="forbid")
 
-    new_secret: str
+    new_secret: Annotated[SecretStr, Field(repr=False, min_length=1, max_length=512)]

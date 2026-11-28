@@ -100,7 +100,7 @@ async def rotate_key(
     payload: KeyRotateRequest,
     key_store: CallerKeyStoreDep,
 ) -> RotatedKey:
-    if not await key_store.arotate_key(key_id, payload.new_secret):
+    if not await key_store.arotate_key(key_id, payload.new_secret.get_secret_value()):
         raise http_error(404, "not_found", f"Unknown key_id: {key_id}")
     return RotatedKey(status="rotated", key_id=key_id)
 
