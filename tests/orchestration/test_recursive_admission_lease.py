@@ -16,6 +16,8 @@ from safe_url.normalized_url import NormalizedUrl
 from tests._admission_runs import minimum_admission_run
 from tests._recursive_harnesses import make_crawl_task
 
+_UNIT_SCALE = Scale(1.0)
+
 
 class _Granted(NamedTuple):
     allocation: Allocation
@@ -25,8 +27,9 @@ class _Granted(NamedTuple):
 class _LeaseTrackingAdmission:
     """Counts live leases the way the shared governor's in-flight count does."""
 
-    def __init__(self) -> None:
+    def __init__(self, scale: Scale = _UNIT_SCALE) -> None:
         self.in_flight = 0
+        self.scale = scale
 
     @asynccontextmanager
     async def admit(self, want: Want) -> AsyncGenerator[Granted]:
@@ -38,7 +41,7 @@ class _LeaseTrackingAdmission:
                     LaneId.HEAVY: AllocationEntry(Count(want.lanes[LaneId.HEAVY].value)),
                 }
             )
-            yield cast("Granted", _Granted(allocation))
+            yield cast("Granted", _Granted(allocation, self.scale))
         finally:
             self.in_flight -= 1
 
@@ -68,3 +71,22 @@ async def test_robots_stage_failure_releases_the_admission_lease() -> None:
         await admit_recursive_batch(run, state, get_metrics())
 
     assert tracking.in_flight == 0, "the failed robots stage stranded a live admission lease"
+
+
+async def test_throttle_metric_failure_releases_the_admission_lease(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A raise after admission succeeds must still close the lease exactly once."""
+    tasks = [make_crawl_task(0, "a")]
+    run, state, _ = minimum_admission_run(tasks, http_quota=10, browser_quota=10)
+    tracking = _LeaseTrackingAdmission(scale=Scale(0.5))
+    metrics = get_metrics()
+
+    async def explode() -> None:
+        raise RuntimeError("throttle metric exploded")
+
+    monkeypatch.setattr(metrics, "record_throttle", explode)
+    run = replace(run, admission=tracking, respect_robots=False)
+
+    with pytest.raises(RuntimeError, match="throttle metric exploded"):
+        await admit_recursive_batch(run, state, metrics)
+
+    assert tracking.in_flight == 0, "the failed throttle metric stranded a live admission lease"

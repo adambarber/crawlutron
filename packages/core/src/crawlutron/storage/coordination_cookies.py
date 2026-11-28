@@ -67,7 +67,7 @@ class SharedCookieStore(CoordinationStore):
                 self._conn.execute(
                     "DELETE FROM coordination_cookies WHERE (namespace, host) IN ("
                     "SELECT namespace, host FROM coordination_cookies WHERE namespace = ? "
-                    "ORDER BY touched_at ASC LIMIT -1 OFFSET ?)",
+                    "ORDER BY touched_at DESC, host DESC LIMIT -1 OFFSET ?)",
                     (key[0], self._max_hosts),
                 )
 
