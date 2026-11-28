@@ -54,9 +54,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 robots_cache = _robots_policy.robots_cache
-RobotsMatcher = _robots_policy.RobotsMatcher
-load_robots_rules = _robots_policy.load_robots_rules
-cached_sitemaps = _robots_policy.cached_sitemaps
 
 # Read the gate via resource_gate(): do not capture the reference before the reset swaps it.
 _resource_gate = ResourceGate()

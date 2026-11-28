@@ -304,6 +304,7 @@ DECLARED_SURFACE_RATCHET = {
     # predicted.
     "packages/rest/src/crawlutron_rest/cli/__main__.py": (11, 2),
     "packages/rest/src/crawlutron_rest/cli/client.py": (3, 1),
-    "packages/rest/src/crawlutron_rest/cli/docker.py": (11, 1),
+    # #1389: down-only after the unused DockerUnavailable surface was removed.
+    "packages/rest/src/crawlutron_rest/cli/docker.py": (10, 1),
     "packages/rest/src/crawlutron_rest/cli/output.py": (1, 1),
 }

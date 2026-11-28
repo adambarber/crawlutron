@@ -262,7 +262,7 @@ def _print_deepest(appearances: AppearanceList, show: int) -> None:
 
 def _print_logic_vs_preamble(results: SweepResults, args: argparse.Namespace) -> None:
     """Logic vs preamble at the current token line, and the tipping point."""
-    current_lines, current_tokens, _ = gate.configured_floor()
+    current_lines, _, _ = gate.configured_floor()
     floors = sorted(results)
     print("\nLOGIC vs PREAMBLE  (a preamble pair is Python's own import/docstring shape)")
     print(f"  {'floor':>6} | {'total':>6} {'logic':>6} {'preamble':>9} {'logic%':>7} {'logic tokens':>13}")

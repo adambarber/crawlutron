@@ -184,8 +184,8 @@ class _HTMLExtractor(html_parser.HTMLParser):
         text, markdown, title = self._text.result()
         if title:
             self._meta.set_title(title)
-        tables, table_headers, table_flags, tables_truncated = self._tables.result()
-        forms, frames, ff_flags = self._forms_frames.result()
+        tables, _, table_flags, tables_truncated = self._tables.result()
+        forms, frames, _ = self._forms_frames.result()
         links, links_refused = self._links.result()
         metadata = self._meta.result()
         truncated = self._srcdoc_refused or tables_truncated or self._links._links_truncated

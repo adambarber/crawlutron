@@ -9,6 +9,8 @@ import ast
 import pathlib
 import re
 
+from crawlutron.orchestration import engine
+from crawlutron_rest.cli import docker
 from tests._walk_primitives import import_roots
 from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, relative_posix
 from tests.chokepoint_walks import assignment_targets, canonical_tree
@@ -359,3 +361,14 @@ def test_models_typing_detectors_bite(tmp_path):
     ]
     (tmp_path / "__init__.py").write_text('"""A barrel."""\n\nimport os\n')
     assert len(_models_reexport_offenders(tmp_path)) == 1, "a bare import is a re-export too"
+
+
+def test_engine_exposes_no_robots_reexport_aliases() -> None:
+    """The live robots doors are imported from their true home."""
+    for name in ("RobotsMatcher", "load_robots_rules", "cached_sitemaps"):
+        assert not hasattr(engine, name), name
+
+
+def test_docker_cli_exposes_no_unused_error_type() -> None:
+    """The docker-missing path reports usage, not an unused exception."""
+    assert not hasattr(docker, "DockerUnavailable")
