@@ -135,6 +135,7 @@ graph LR
     models_crawl_request --> models_crawl_policy
     models_crawl_request --> models_fetch_validators
     models_crawl_request --> models_single_url_source_request
+    models_crawl_request --> vocabulary_limits
     models_crawl_request --> pydantic
     models_crawl_result --> models_classification_evidence
     models_crawl_result --> models_crawl_diagnostics
@@ -270,6 +271,7 @@ graph LR
     models_unified_crawl_result --> normalized_url
     models_watch_announcement --> vocabulary_taxonomy
     models_watch_create_request --> models_watch_state
+    models_watch_create_request --> vocabulary_limits
     models_watch_create_request --> pydantic
     models_watch_deleted_response --> pydantic
     models_watch_id_request --> pydantic

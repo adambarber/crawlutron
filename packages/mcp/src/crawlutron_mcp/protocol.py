@@ -29,6 +29,7 @@ class ProtocolValidationError(Exception):
         message: JsonValue = "validation error"
         if isinstance(payload, dict):
             error = payload.get("error")
+            payload_message: JsonValue | None = None
             if isinstance(error, dict):
                 payload_message = error.get("message")
             # A present-but-None message must not render as str(None).

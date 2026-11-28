@@ -56,6 +56,10 @@ MAX_HTTP_TIMEOUT_SECONDS: int = 120
 # ceiling origins accept, it also bounds one policy's total header size.
 MAX_HEADER_VALUE_BYTES: Final[int] = 8 * 1024
 
+#: Longest webhook URL admitted at the model boundary; the delivery door still
+#: owns scheme and reachability (service/webhooks.py).
+MAX_WEBHOOK_URL_LENGTH: Final[int] = 2048
+
 # Three retry numbers, three authorities: DEFAULT (no operator stated one),
 # MAX_RETRIES (deployment ceiling), MAX_JOB_MAX_RETRIES (one flaky job may exceed it).
 DEFAULT_MAX_RETRIES: int = 5

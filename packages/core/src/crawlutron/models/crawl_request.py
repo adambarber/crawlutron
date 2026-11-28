@@ -10,6 +10,7 @@ from crawlutron.extraction.output_formats import OutputFormat
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.fetch_validators import FetchValidators
 from crawlutron.models.single_url_source_request import SingleUrlSourceRequest
+from crawlutron.vocabulary.limits import MAX_WEBHOOK_URL_LENGTH
 
 #: Policy, not schema: a caller can size a validators map freely, and unbounded is a
 #: fan-out agreed to before any admission check runs.
@@ -44,6 +45,7 @@ class CrawlRequest(SingleUrlSourceRequest):
     webhook_url: Annotated[
         str | None,
         Field(
+            max_length=MAX_WEBHOOK_URL_LENGTH,
             description="Optional callback URL (https:// required). When provided with async_mode, the crawl "
             "is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.",
         ),
