@@ -25,3 +25,22 @@ def test_none_message_falls_back_to_default():
     # so only a non-empty string may carry the payload's message.
     error = ProtocolValidationError(400, {"error": {"message": None}})
     assert str(error) == "validation error"
+
+
+def test_string_error_payload_classifies_as_validation_error():
+    # #1536: a non-dict ``error`` value must not raise UnboundLocalError; every
+    # payload shape resolves to the default message from one decision point.
+    error = ProtocolValidationError(400, {"error": "bad request"})
+    assert error.status_code == 400
+    assert error.payload == {"error": "bad request"}
+    assert str(error) == "validation error"
+
+
+def test_non_dict_error_value_classifies_as_validation_error():
+    error = ProtocolValidationError(400, {"error": 5})
+    assert str(error) == "validation error"
+
+
+def test_empty_dict_payload_classifies_as_validation_error():
+    error = ProtocolValidationError(400, {})
+    assert str(error) == "validation error"
