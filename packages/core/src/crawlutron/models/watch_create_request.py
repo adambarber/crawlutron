@@ -7,6 +7,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from crawlutron.models.watch_state import IntervalSeconds
+from crawlutron.vocabulary.limits import MAX_WEBHOOK_URL_LENGTH
 
 
 class WatchCreateRequest(BaseModel):
@@ -26,6 +27,7 @@ class WatchCreateRequest(BaseModel):
     webhook_url: Annotated[
         str | None,
         Field(
+            max_length=MAX_WEBHOOK_URL_LENGTH,
             description="Where to POST a change notification (https:// required). "
             "Omit for a poll-only watch.",
         ),

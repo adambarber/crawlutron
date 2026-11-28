@@ -6,7 +6,28 @@ import pytest
 from pydantic import ValidationError
 
 from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.vocabulary.limits import MAX_WEBHOOK_URL_LENGTH
 from tests._validation_helpers import assert_non_finite_float_field_refused
+
+
+def _webhook_url_of_length(length: int) -> str:
+    return "https://example.com/" + "x" * (length - len("https://example.com/"))
+
+
+def test_crawl_request_refuses_overlong_webhook_url():
+    too_long = _webhook_url_of_length(MAX_WEBHOOK_URL_LENGTH + 1)
+    with pytest.raises(ValidationError):
+        CrawlRequest(url="https://example.com/", webhook_url=too_long)
+
+
+def test_crawl_request_accepts_boundary_webhook_url():
+    boundary = _webhook_url_of_length(MAX_WEBHOOK_URL_LENGTH)
+    request = CrawlRequest(url="https://example.com/", webhook_url=boundary)
+    assert request.webhook_url == boundary
+
+
+def test_crawl_request_accepts_none_webhook_url():
+    assert CrawlRequest(url="https://example.com/").webhook_url is None
 
 
 def test_crawl_request_accepts_delta_knobs():
