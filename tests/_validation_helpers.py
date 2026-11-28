@@ -36,6 +36,11 @@ def assert_non_finite_float_field_refused(make_request, field: str) -> bool:
     return True
 
 
+def _webhook_url_of_length(length: int) -> str:
+    """A webhook URL of exactly ``length`` characters."""
+    return "https://example.com/" + "x" * (length - len("https://example.com/"))
+
+
 __all__ = [
     "UNRESTRICTED_HOST_POLICY",
     "admit_or_none",

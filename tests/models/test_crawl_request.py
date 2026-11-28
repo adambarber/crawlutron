@@ -7,11 +7,10 @@ from pydantic import ValidationError
 
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.vocabulary.limits import MAX_WEBHOOK_URL_LENGTH
-from tests._validation_helpers import assert_non_finite_float_field_refused
-
-
-def _webhook_url_of_length(length: int) -> str:
-    return "https://example.com/" + "x" * (length - len("https://example.com/"))
+from tests._validation_helpers import (
+    _webhook_url_of_length,
+    assert_non_finite_float_field_refused,
+)
 
 
 def test_crawl_request_refuses_overlong_webhook_url():
