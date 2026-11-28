@@ -350,9 +350,6 @@ class BrowserDriver:
         risk); actions are best-effort but not silent -- a wait that never resolves is a real quality loss.
         """
         for action in actions:
-            if not isinstance(action, dict):
-                logger.warning("browser_action_skipped", extra={"reason": "action_not_an_object"})
-                continue
             action_type = str(action.get("type", "")).lower()
             if action_type not in BROWSER_ACTION_TYPES:
                 # The model boundary refuses an unknown type, so reaching this is a

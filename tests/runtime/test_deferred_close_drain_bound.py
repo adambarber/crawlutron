@@ -111,5 +111,5 @@ async def test_concurrent_drains_each_respect_the_bound():
     before = time.monotonic()
     results = await asyncio.wait_for(asyncio.gather(owner.drain(), owner.drain()), timeout=2.0)
 
-    assert results == [None, None], "both drains must return"
+    assert len(results) == 2 and all(result is None for result in results), "both drains must return"
     assert time.monotonic() - before < 1.0, "a re-entrant drain ignored the bound"

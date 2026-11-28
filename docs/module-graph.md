@@ -622,10 +622,10 @@ graph LR
     service_request_identity --> safety_json_safe
     service_request_identity --> storage_ids
     service_request_identity --> pydantic
-    service_response_shaping --> admission_admission_links
     service_response_shaping --> delta
     service_response_shaping --> models_crawl_result
     service_response_shaping --> models_crawl_status
+    service_response_shaping --> models_discovered_link
     service_response_shaping --> models_result_record
     service_response_shaping --> models_unified_crawl_response
     service_response_shaping --> models_unified_crawl_result

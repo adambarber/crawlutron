@@ -269,7 +269,9 @@ def test_both_singletons_queue_through_one_shared_implementation(stub_builder):
 
     asyncio.run(_drain_from_the_http_side())
     # One shared queue: the httpx fetch's drain also releases the cffi session.
-    assert http_first.closed is True and cffi_first.closed is True, (
+    http_closed = bool(http_first.closed)
+    cffi_closed = bool(cffi_first.closed)
+    assert http_closed is True and cffi_closed is True, (
         "both pooled clients must route their superseded close through one queue"
     )
 

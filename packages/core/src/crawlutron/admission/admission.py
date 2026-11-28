@@ -126,16 +126,9 @@ def admitted_page_identities(job: CrawlJobState, *, host_policy: HostPolicy) -> 
     No normalization pass here: entries are canonical by construction (ingress and
     the shared chokepoint normalize once at the storage boundary).
     """
-    identities: set[NormalizedUrl] = set()
-    values = set(job.visited) | {entry.url for entry in job.in_flight} | {entry.url for entry in job.frontier}
-    for value in values:
-        if isinstance(value, NormalizedUrl):
-            identities.add(value)
-        elif isinstance(value, str) and value:
-            admitted = admit_or_none(value, policy=host_policy)
-            if admitted is not None:
-                identities.add(admitted)
-    return identities
+    # Every stored form is admitted at its write edge, so the union is already
+    # canonical identities -- no second normalization or host-policy pass here.
+    return set(job.visited) | {entry.url for entry in job.in_flight} | {entry.url for entry in job.frontier}
 
 
 def normalize_sitemap_candidates(

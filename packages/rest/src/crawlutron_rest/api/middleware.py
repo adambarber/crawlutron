@@ -195,7 +195,7 @@ def _declared_stream_receive(
     """Count a declared body through to the app without retaining it."""
     delivered = 0
     deadline = time.monotonic() + BODY_DEADLINE_SECONDS
-    capped = None
+    capped: Receive | None = None
 
     async def receive() -> Message:
         nonlocal delivered, capped

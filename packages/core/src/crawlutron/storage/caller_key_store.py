@@ -11,6 +11,7 @@ import secrets
 import threading
 import time
 from pathlib import Path
+from typing import Protocol
 
 from crawlutron.models.caller_key import CallerKey
 from crawlutron.models.issued_key import IssuedKey
@@ -133,6 +134,12 @@ def _body_proof(body: str) -> str:
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
+class _AuditSink(Protocol):
+    """The one operation this store needs from an attached audit trail."""
+
+    def record_event(self, *, actor: str, action: str, target_key_id: str | None, outcome: str) -> None: ...
+
+
 class CallerKeyStore(CoordinationStore):
     """SQLite-backed store of inbound caller key records keyed by key id.
 
@@ -144,12 +151,12 @@ class CallerKeyStore(CoordinationStore):
 
     def __init__(self, db_path: str | Path) -> None:
         super().__init__(db_path)
-        self._audit = None
+        self._audit: _AuditSink | None = None
         self._proven_bodies: BoundedTTLCache[str, str] = BoundedTTLCache(
             max_entries=_PROVEN_BODY_CACHE_MAX, ttl=_PROVEN_BODY_TTL_SECONDS
         )
 
-    def attach_audit(self, audit) -> None:
+    def attach_audit(self, audit: _AuditSink) -> None:
         """Wire the audit sink; a store without one stays unrecorded (tests).
         Production wiring always attaches, so an omission is visible at review.
         """

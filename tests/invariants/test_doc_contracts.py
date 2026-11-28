@@ -321,8 +321,6 @@ _FENCED_JSON = re.compile(r"```json\n(.*?)```", re.DOTALL)
 
 def _classify_request_shape(payload: dict[str, JsonValue]) -> type[BaseModel] | None:
     """The live model a JSON object claims to be, or None when it is not a request."""
-    if not isinstance(payload, dict):
-        return None
     if "strategies" in payload:
         return CrawlPolicy
     if "options" in payload and ("url" in payload or "urls" in payload):

@@ -248,7 +248,7 @@ def txn_read(
     stack = None
     if bounded:
         context = {"rows": 0, "bytes": 0, "max_rows": max_rows, "max_bytes": max_bytes, "deadline": deadline}
-        stack = cast(list, getattr(_READ_TXN, "bound_stack", None))
+        stack = cast(list[dict[str, int | float | None]] | None, getattr(_READ_TXN, "bound_stack", None))
         if stack is None:
             stack = []
             _READ_TXN.bound_stack = stack

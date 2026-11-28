@@ -141,8 +141,6 @@ def _absorb_path_aliases(tree: ast.AST, anchors: set[str], rooted: set[str]) -> 
         if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
             continue
         components = path_components(node.value)
-        if components is None:
-            continue
         role = _tree_role(components, anchors, rooted)
         if role not in {"app", "root"}:
             continue

@@ -7,7 +7,7 @@ import pathlib
 
 from crawlutron.config.settings import ENVIRONMENT_FIELD_ALIASES
 from tests.chokepoint_paths import REPO_ROOT
-from tests.chokepoint_walks import app_trees, class_defs, file_tree, string_literals
+from tests.chokepoint_walks import app_trees, class_defs, file_tree, nodes_of, string_literals
 from tests.invariants._env_knobs import (
     _KNOB_PATTERN,
     _consumed_knobs,
@@ -71,8 +71,12 @@ def _production_browser_knob_references() -> set[str]:
     fields = _settings_fields()
     field_knobs = {f"CRAWLUTRON_{field.upper()}": field for field in fields}
     for path, tree in app_trees(exclude=frozenset()):
-        for node in string_literals(tree):
-            if isinstance(node.value, str) and (not _settings_alias_declaration_constant(path, tree, node)):
+        for node in nodes_of(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and not _settings_alias_declaration_constant(path, tree, node)
+            ):
                 environment = _environment_reader_reference(
                     tree,
                     node,

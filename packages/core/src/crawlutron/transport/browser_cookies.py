@@ -147,7 +147,7 @@ async def harvest_session_cookies(
         records: dict[str, CookieRecord] = {}
         for cookie in cookies:
             name = cookie.get("name")
-            if not name:
+            if not isinstance(name, str) or not name:
                 continue
             raw_expires = cookie.get("expires")
             expiry = float(raw_expires) if isinstance(raw_expires, (int, float)) else None

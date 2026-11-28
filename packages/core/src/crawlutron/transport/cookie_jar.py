@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 # typeshed omits this stdlib parser; vars() reads it without tripping the mypy attr check or B009.
 _parse_ns_headers = cast(
-    "Callable[[list[str]], list[list[tuple[str, str | None]]]]",
+    "Callable[[list[str]], list[list[tuple[str, str | float | None]]]]",
     vars(_cookiejar_module)["parse_ns_headers"],
 )
 
@@ -277,7 +277,7 @@ def _parse_set_cookie(header: str, url: NormalizedUrl) -> tuple[str, CookieRecor
     if pairs is None:
         return None
     (name, value), *raw_attrs = pairs
-    if not name or value is None:
+    if not name or not isinstance(value, str):
         return None
     attrs = dict(raw_attrs)
     if (resolved := _cookie_domain(attrs, url)) is None:
@@ -293,7 +293,7 @@ def _parse_set_cookie(header: str, url: NormalizedUrl) -> tuple[str, CookieRecor
     )
 
 
-def _ns_pairs(header: str) -> list[tuple[str, str | None]] | None:
+def _ns_pairs(header: str) -> list[tuple[str, str | float | None]] | None:
     """The stdlib Netscape parse of one Set-Cookie header; None when unusable."""
     try:
         parsed = _parse_ns_headers([header])
@@ -305,10 +305,10 @@ def _ns_pairs(header: str) -> list[tuple[str, str | None]] | None:
     return pairs if pairs else None
 
 
-def _cookie_domain(attrs: dict[str, str | None], url: NormalizedUrl) -> tuple[str, bool] | None:
+def _cookie_domain(attrs: dict[str, str | float | None], url: NormalizedUrl) -> tuple[str, bool] | None:
     """The storage domain with its host-only pin (5.3 steps 4-6), or None to refuse."""
     domain_attr = attrs.get("domain")
-    if not domain_attr:
+    if not isinstance(domain_attr, str) or not domain_attr:
         return url.host.lower(), True
     domain = domain_attr.lstrip(".").lower()
     if is_public_suffix(domain):  # 6265bis 5.3: only the request host stays, host-only
@@ -338,7 +338,7 @@ def _default_path(url: NormalizedUrl) -> str:
     return path[:cut] if cut > 0 else "/"
 
 
-def _expiry(attrs: dict[str, str | None]) -> float | None:
+def _expiry(attrs: dict[str, str | float | None]) -> float | None:
     """RFC 6265 5.2.1/5.2.2: max-age wins; zero or a past date means now.
     A malformed max-age is ignored (the attribute does not apply), so a remote
     server cannot fail our fetch with a bad header value."""
